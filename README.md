@@ -1,8 +1,8 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc17  
+**Current version:** v0.0.1  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
-**Status:** Technical POC / hardening line
+**Status:** Frozen trial baseline
 
 Native Endpoint Workspace is a Windows workspace for arranging independent native top-level application windows as adaptive tiled **Native Endpoints**. External applications stay normal top-level windows; the Workspace manages their screen geometry, Cell membership, layout lock, group visibility, and Z-order without embedding or reparenting.
 

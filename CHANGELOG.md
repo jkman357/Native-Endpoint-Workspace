@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
+All notable changes to Native Endpoint Workspace are recorded here. `v0.0.1` is the frozen trial baseline derived from the accepted `v0.0.1rc17` freeze candidate.
+
+## v0.0.1 — Frozen Trial Baseline
+
+- froze the accepted `v0.0.1rc17` source baseline as the formal `v0.0.1` trial release
+- retained the 1-8 Cell adaptive topology, F1-F8 assignment/removal workflow, detach-only lifecycle, single-anchor Z-order model, throttled interactive layout, final geometry/repaint convergence handling, identity/schema/shortcut hardening, and build/test/runtime diagnostics
+- changed release/version metadata from `v0.0.1rc17` to `v0.0.1` without intentional Native Endpoint behavior changes
+- established `v0.0.1` as an immutable trial baseline; subsequent fixes should be developed on the next maintenance RC line rather than modifying this release in place
 
 ## v0.0.1rc17 — 1-8 Cell Topology + Resize/Repaint Convergence
 
