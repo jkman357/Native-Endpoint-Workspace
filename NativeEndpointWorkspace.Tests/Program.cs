@@ -20,6 +20,7 @@ namespace NativeEndpointWorkspace.Tests
             Run("Destroyed handle tombstones the bound endpoint instance", TestDestroyTombstone);
             Run("Hotkey partial registration failure rolls back previous set", TestShortcutTransactionRollback);
             Run("Unsupported layout schema is rejected", TestUnsupportedSchemaRejected);
+            Run("Removing an arbitrary Cell shifts later endpoint bindings down", TestCellRemovalShift);
 
             Console.WriteLine();
             Console.WriteLine("Tests: " + _passed + " passed, " + _failed + " failed");
@@ -99,11 +100,31 @@ namespace NativeEndpointWorkspace.Tests
             }
         }
 
+        private static void TestCellRemovalShift()
+        {
+            var registry = new EndpointRegistry();
+            var endpoint5 = new NativeEndpoint(5, new IntPtr(0x5000), "ignored", "five", 10, 20, 30, "TestWindow");
+            var endpoint6 = new NativeEndpoint(6, new IntPtr(0x6000), "ignored", "six", 11, 21, 31, "TestWindow");
+            var endpoint8 = new NativeEndpoint(8, new IntPtr(0x8000), "ignored", "eight", 12, 22, 32, "TestWindow");
+            registry.Bind(5, endpoint5);
+            registry.Bind(6, endpoint6);
+            registry.Bind(8, endpoint8);
+
+            NativeEndpoint removed = registry.RemoveCellAndShiftDown(5);
+
+            AssertTrue(object.ReferenceEquals(endpoint5, removed));
+            AssertTrue(object.ReferenceEquals(endpoint6, registry.GetByCell(5)));
+            AssertTrue(object.ReferenceEquals(endpoint8, registry.GetByCell(7)));
+            AssertEqual(5, endpoint6.CellId);
+            AssertEqual(7, endpoint8.CellId);
+            AssertTrue(registry.GetByCell(8) == null);
+        }
+
         private static void TestUnsupportedSchemaRejected()
         {
             var state = new WorkspaceState
             {
-                Version = "0.0.1rc15",
+                Version = "0.0.1rc16",
                 LayoutSchemaVersion = 99,
                 CellCount = 4
             };

@@ -53,6 +53,36 @@ namespace NativeEndpointWorkspace.Services
             }
         }
 
+        public NativeEndpoint RemoveCellAndShiftDown(int removedCellId)
+        {
+            if (removedCellId < 1 || removedCellId > WorkspaceConstants.MaximumCellCount)
+                throw new ArgumentOutOfRangeException(nameof(removedCellId));
+
+            lock (_gate)
+            {
+                NativeEndpoint removed = null;
+                _byCell.TryGetValue(removedCellId, out removed);
+                _byCell.Remove(removedCellId);
+
+                KeyValuePair<int, NativeEndpoint>[] shifted = _byCell
+                    .Where(x => x.Key > removedCellId)
+                    .OrderBy(x => x.Key)
+                    .ToArray();
+
+                foreach (KeyValuePair<int, NativeEndpoint> pair in shifted)
+                    _byCell.Remove(pair.Key);
+
+                foreach (KeyValuePair<int, NativeEndpoint> pair in shifted)
+                {
+                    int newCellId = pair.Key - 1;
+                    pair.Value.ReassignCellId(newCellId);
+                    _byCell[newCellId] = pair.Value;
+                }
+
+                return removed;
+            }
+        }
+
         public NativeEndpoint MarkDestroyed(IntPtr hwnd)
         {
             lock (_gate)

@@ -48,6 +48,13 @@ namespace NativeEndpointWorkspace.Core
             Interlocked.Exchange(ref _destroyObserved, 1);
         }
 
+        internal void ReassignCellId(int cellId)
+        {
+            if (cellId < 1 || cellId > WorkspaceConstants.MaximumCellCount)
+                throw new ArgumentOutOfRangeException(nameof(cellId));
+            CellId = cellId;
+        }
+
         public string DisplayName
         {
             get

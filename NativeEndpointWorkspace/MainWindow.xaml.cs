@@ -143,6 +143,7 @@ namespace NativeEndpointWorkspace
 
                 var cell = new CellControl(i);
                 cell.DetachRequested += Cell_DetachRequested;
+                cell.RemoveRequested += Cell_RemoveRequested;
                 _cells.Add(i, cell);
             }
 
@@ -150,8 +151,41 @@ namespace NativeEndpointWorkspace
             {
                 CellControl cell = _cells[cellId];
                 cell.DetachRequested -= Cell_DetachRequested;
+                cell.RemoveRequested -= Cell_RemoveRequested;
                 _cells.Remove(cellId);
             }
+        }
+
+        private void RecreateActiveCellControls()
+        {
+            foreach (CellControl cell in _cells.Values)
+            {
+                cell.DetachRequested -= Cell_DetachRequested;
+                cell.RemoveRequested -= Cell_RemoveRequested;
+            }
+            _cells.Clear();
+            EnsureActiveCellControls();
+
+            foreach (NativeEndpoint endpoint in _registry.All())
+            {
+                CellControl cell;
+                if (_cells.TryGetValue(endpoint.CellId, out cell))
+                    cell.SetEndpoint(endpoint);
+            }
+        }
+
+        private void ResetCellIndexedRuntimeStateAfterTopologyChange()
+        {
+            foreach (DispatcherTimer timer in _sizeVerificationTimers.Values)
+                timer.Stop();
+            _sizeVerificationTimers.Clear();
+            _locationCorrectionSuppressedUntil.Clear();
+            _pendingLocationCorrections.Clear();
+            _correctionStates.Clear();
+            _lastRequestedCellRects.Clear();
+            _lastVerifiedCellRects.Clear();
+            _cellMinimumHostWidths.Clear();
+            _cellMinimumHostHeights.Clear();
         }
 
         private static int[] GetRowCellCounts(int cellCount)
@@ -423,6 +457,57 @@ namespace NativeEndpointWorkspace
             StatusText.Text = old == null
                 ? "Cell " + cell.CellId + " is already detached."
                 : "Detached " + old.DisplayName + " from Cell " + cell.CellId + "; application remains open and Layout Lock is released.";
+        }
+
+        private void Cell_RemoveRequested(object sender, EventArgs e)
+        {
+            var cell = sender as CellControl;
+            if (cell == null)
+                return;
+
+            if (_cellCount <= WorkspaceConstants.MinimumCellCount)
+            {
+                StatusText.Text = "At least " + WorkspaceConstants.MinimumCellCount + " Cells are required; F" + cell.CellId + " was not removed.";
+                return;
+            }
+
+            int removedCellId = cell.CellId;
+            NativeEndpoint endpointToDetach = _registry.GetByCell(removedCellId);
+            if (endpointToDetach != null)
+            {
+                MessageBoxResult result = MessageBox.Show(this,
+                    "Remove F" + removedCellId + " and detach its bound endpoint?\n\n" +
+                    "The external application will remain open. Remaining Cells will be renumbered contiguously and reflow automatically.",
+                    "Remove Cell F" + removedCellId,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (result != MessageBoxResult.Yes)
+                    return;
+            }
+
+            NativeEndpoint removedEndpoint = _registry.RemoveCellAndShiftDown(removedCellId);
+            if (removedEndpoint != null)
+            {
+                _runtimeLog.Info("ENDPOINT_DETACH", RuntimeLogService.EndpointMetadata(removedEndpoint) + " reason=cell_removed");
+                ClearEndpointRuntimeState(removedEndpoint);
+            }
+
+            _cellCount--;
+            _updatingCellCountUi = true;
+            try { CellCountComboBox.SelectedItem = _cellCount; }
+            finally { _updatingCellCountUi = false; }
+
+            ResetCellIndexedRuntimeStateAfterTopologyChange();
+            RecreateActiveCellControls();
+            BuildAdaptiveLayout(null);
+            RefreshManagedHandleSnapshot();
+            string shortcutSummary = ApplyActiveShortcutBindings();
+
+            _runtimeLog.Info("CELL_REMOVE", "removed=F" + removedCellId + " cells=" + _cellCount + " detached=" + (removedEndpoint != null));
+            StatusText.Text = "Removed F" + removedCellId + "; remaining Cells reindexed F1-F" + _cellCount +
+                              " and layout reflowed automatically. " +
+                              (removedEndpoint != null ? "Its endpoint was detached and left open. " : string.Empty) +
+                              shortcutSummary;
         }
 
         private void RefreshManagedHandleSnapshot()

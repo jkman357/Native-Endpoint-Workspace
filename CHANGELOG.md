@@ -2,6 +2,19 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
 
+## v0.0.1rc16 — Direct Cell Removal + Adaptive Reflow
+
+- made each `F1` through `F12` Cell badge a direct Cell-removal control
+- allowed an arbitrary Cell to be removed while enforcing the existing minimum of 4 active Cells
+- when removing a bound Cell, require confirmation, detach that endpoint, and leave the external application open
+- shift later endpoint bindings down one Cell so active Cells remain contiguous `F1...FN` rather than leaving holes
+- rebuild the adaptive topology immediately after removal so the remaining Cells automatically consume the available Workspace area
+- keep the `Cells` selector for bulk count changes and for increasing the number of active Cells
+- reset Cell-indexed geometry/correction caches after a topology mutation and schedule a fresh final native layout commit
+- add characterization coverage for arbitrary Cell removal and endpoint-binding shift semantics
+- retain rc15 endpoint repaint stabilization and Cell chrome cleanup
+- advanced application/runtime/source baseline to v0.0.1rc16
+
 ## v0.0.1rc15 — Endpoint Repaint Stabilization + Cell Header Cleanup
 
 - removed the fixed per-Cell `layout locked • drag splitters between Cells` footer to reclaim content space

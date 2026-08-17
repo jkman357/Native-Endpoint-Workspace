@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc15  
+**Current version:** v0.0.1rc16  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Technical POC / hardening line
 
@@ -72,7 +72,8 @@ Firefox tabs are not endpoints. Use separate Firefox top-level windows for separ
 
 - **Detach:** releases the endpoint from its Cell and Layout Lock; the application remains open.
 - **Application X:** close the application using its own native window controls. Destroy/stale handling clears the Cell automatically.
-- **Reduce Cell count:** endpoints in removed Cells are detached; applications remain open.
+- **Remove a specific Cell:** click its `F#` badge. If an endpoint is bound, confirm the removal; that endpoint is detached and left open. Later Cells shift down to keep contiguous `F1...FN` identities and the layout reflows automatically.
+- **Reduce Cell count:** the `Cells` selector still supports bulk count changes; endpoints in removed trailing Cells are detached and applications remain open.
 - **Load Layout:** runtime endpoint handles are not restored from disk.
 - **Close Workspace:** all bindings are detached/stopped and **external applications remain open**. The Workspace does not send `WM_CLOSE` to external applications.
 
@@ -96,13 +97,14 @@ Runtime HWND/PID/TID data is never persisted to layout files.
 ## Adaptive layout
 
 - 4 through 12 Cells; default 8.
-- Cell headers use compact `F1` through `F12` badges instead of redundant `Cell 1` / `Cell 2` labels.
+- Cell headers use compact clickable `F1` through `F12` badges instead of redundant `Cell 1` / `Cell 2` labels. Clicking a badge removes that specific Cell, down to a minimum of 4 Cells.
 - The fixed per-Cell `layout locked` footer is removed; status output is reserved for useful runtime events/results.
 - Workspace owns a fixed total layout area.
 - Splitters redistribute area instead of allowing Cells to float outside the Workspace.
 - Each row can have independent horizontal proportions.
 - Row heights can be redistributed.
 - Applications that reject an undersized rectangle can cause their Cell/row allocation to grow; the Workspace may grow within the monitor work area.
+- Removing an arbitrary Cell reindexes later Cells contiguously and immediately rebuilds the adaptive topology.
 - `Reset Cell Layout` restores equal proportions without dropping bindings.
 
 ## Shortcut policy
@@ -181,6 +183,7 @@ Examples of recorded events:
 
 - Workspace session start/exit
 - endpoint bind/detach/destroy
+- Cell removal/reindex and adaptive reflow
 - Cell ID, HWND, PID/TID, process name
 - shortcut apply/rollback
 - save/load success/failure
@@ -246,6 +249,7 @@ Initial automated characterization covers:
 - strong endpoint identity fail-closed behavior
 - exact legacy layout-version boundary behavior
 - Cell topology fail-fast behavior
+- arbitrary Cell removal endpoint-shift behavior
 - destroy tombstone behavior
 - global-hotkey transaction rollback
 - unsupported layout schema rejection

@@ -18,9 +18,10 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Border Margin="5,4" Padding="7,2" Background="#445064" CornerRadius="3">
-                    <TextBlock x:Name="CellNumberText" Foreground="White" FontWeight="Bold" VerticalAlignment="Center"/>
-                </Border>
+                <Button x:Name="CellBadgeButton" Margin="5,4" Padding="7,2" Background="#445064" Foreground="White"
+                        BorderBrush="#65738A" BorderThickness="1" FontWeight="Bold" Cursor="Hand"
+                        Click="CellBadgeButton_Click"
+                        ToolTip="Remove this Cell. Any bound endpoint is detached and left open; remaining Cells reflow automatically."/>
                 <TextBlock x:Name="EndpointText" Grid.Column="1" Margin="6,0" Foreground="#E7EBF2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 <Button x:Name="DetachButton" Grid.Column="2" Margin="2,4,5,4" Padding="8,0" Content="Detach" Click="DetachButton_Click"
                         ToolTip="Detach this endpoint from the Cell and leave the application open"/>

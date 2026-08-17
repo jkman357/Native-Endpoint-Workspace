@@ -8,6 +8,7 @@ namespace NativeEndpointWorkspace.UI
     public partial class CellControl : UserControl
     {
         public event EventHandler DetachRequested;
+        public event EventHandler RemoveRequested;
 
         public int CellId { get; private set; }
 
@@ -20,7 +21,7 @@ namespace NativeEndpointWorkspace.UI
         {
             InitializeComponent();
             CellId = cellId;
-            CellNumberText.Text = "F" + cellId;
+            CellBadgeButton.Content = "F" + cellId;
             EndpointText.Text = "No endpoint";
         }
 
@@ -40,6 +41,11 @@ namespace NativeEndpointWorkspace.UI
         private void DetachButton_Click(object sender, RoutedEventArgs e)
         {
             if (DetachRequested != null) DetachRequested(this, EventArgs.Empty);
+        }
+
+        private void CellBadgeButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (RemoveRequested != null) RemoveRequested(this, EventArgs.Empty);
         }
     }
 }
