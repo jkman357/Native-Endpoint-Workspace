@@ -1,0 +1,10 @@
+<Window x:Class="NativeEndpointWorkspace.UI.IdentifyOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" ShowActivated="False" Topmost="True" ResizeMode="NoResize">
+    <Border Background="#CC11161D" BorderBrush="White" BorderThickness="3" CornerRadius="18" Margin="8">
+        <TextBlock x:Name="NumberText" Foreground="White" FontWeight="Bold" FontSize="110"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border>
+</Window>
