@@ -43,6 +43,12 @@ namespace NativeEndpointWorkspace.Core
             get { return Control || Shift || Alt || Win; }
         }
 
+        [XmlIgnore]
+        public bool HasSupportedModifier
+        {
+            get { return Control || Shift || Alt; }
+        }
+
         public string GestureText
         {
             get

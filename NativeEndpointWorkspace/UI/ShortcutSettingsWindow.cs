@@ -16,7 +16,6 @@ namespace NativeEndpointWorkspace.UI
             public CheckBox Ctrl;
             public CheckBox Shift;
             public CheckBox Alt;
-            public CheckBox Win;
             public ComboBox Key;
             public TextBlock Status;
         }
@@ -46,8 +45,8 @@ namespace NativeEndpointWorkspace.UI
             {
                 Text = "Each shortcut assigns the current foreground top-level window to its Cell. " +
                        "Conflicts are detected both inside this workspace and by Windows RegisterHotKey. " +
-                       "At least one modifier (Ctrl, Shift, Alt, or Win) is required; bare F1-F12 global hotkeys are rejected. " +
-                       "A conflicting or unsafe shortcut remains inactive; other valid shortcuts can still register.",
+                       "Use one or more Ctrl / Alt / Shift modifiers. Bare F1-F12 and Win-key global hotkeys are rejected to reduce collisions with normal application and Windows shortcuts. " +
+                       "Conflicting or unavailable shortcuts remain inactive; other valid shortcuts can still register.",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10)
             };
@@ -92,9 +91,8 @@ namespace NativeEndpointWorkspace.UI
             AddText(grid, "Ctrl", 1, true);
             AddText(grid, "Shift", 2, true);
             AddText(grid, "Alt", 3, true);
-            AddText(grid, "Win", 4, true);
-            AddText(grid, "Key", 5, true);
-            AddText(grid, "Status", 6, true);
+            AddText(grid, "Key", 4, true);
+            AddText(grid, "Status", 5, true);
             return grid;
         }
 
@@ -107,20 +105,18 @@ namespace NativeEndpointWorkspace.UI
             var ctrl = AddCheck(grid, binding.Control, 1);
             var shift = AddCheck(grid, binding.Shift, 2);
             var alt = AddCheck(grid, binding.Alt, 3);
-            var win = AddCheck(grid, binding.Win, 4);
-
             var key = new ComboBox { Margin = new Thickness(3), MinWidth = 70 };
             for (int i = 1; i <= WorkspaceConstants.FunctionKeyCount; i++) key.Items.Add("F" + i);
             key.SelectedIndex = Math.Max(0, Math.Min(WorkspaceConstants.FunctionKeyCount - 1, binding.KeyCode - WorkspaceConstants.FunctionKeyFirstVirtualKey));
-            Grid.SetColumn(key, 5);
+            Grid.SetColumn(key, 4);
             grid.Children.Add(key);
 
             var status = new TextBlock { Text = binding.Status, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0) };
-            Grid.SetColumn(status, 6);
+            Grid.SetColumn(status, 5);
             grid.Children.Add(status);
             status.Tag = grid;
 
-            return new EditorRow { Binding = binding, Ctrl = ctrl, Shift = shift, Alt = alt, Win = win, Key = key, Status = status };
+            return new EditorRow { Binding = binding, Ctrl = ctrl, Shift = shift, Alt = alt, Key = key, Status = status };
         }
 
         private void Apply_Click(object sender, RoutedEventArgs e)
@@ -130,7 +126,7 @@ namespace NativeEndpointWorkspace.UI
                 row.Binding.Control = row.Ctrl.IsChecked == true;
                 row.Binding.Shift = row.Shift.IsChecked == true;
                 row.Binding.Alt = row.Alt.IsChecked == true;
-                row.Binding.Win = row.Win.IsChecked == true;
+                row.Binding.Win = false;
                 row.Binding.KeyCode = WorkspaceConstants.FunctionKeyFirstVirtualKey + Math.Max(0, row.Key.SelectedIndex);
             }
 
@@ -146,7 +142,6 @@ namespace NativeEndpointWorkspace.UI
         {
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(55) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });

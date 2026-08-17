@@ -1,11 +1,38 @@
 # Native Endpoint Workspace
 
-**Version:** v0.0.1rc10  
+**Version:** v0.0.1rc11  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2
 
 Native Endpoint Workspace is a Windows technical POC for arranging and managing independent native top-level application windows as adaptive tiled **Native Endpoints** without embedding or reparenting them.
 
 Firefox, Windows Explorer, Notepad++, VS Code, Terminal and similar applications remain normal top-level windows. The Workspace manages their screen geometry, layout membership, group visibility/Z-order, and bound-window lifecycle policy.
+
+
+## rc11 focus — Interactive Layout Performance + UI Cleanup
+
+rc11 preserves the rc10 Z-order stability fix and concentrates on responsiveness and routine-use UI cleanup.
+
+- replace the previous every-layout-pass synchronization path with a bounded interactive commit scheduler
+- coalesce Workspace move/resize and splitter drag updates to approximately 45 ms while interaction is active
+- issue one precise Render-priority final commit when resize/splitter interaction completes
+- separate geometry-dirty and Z-order-dirty work so geometry changes do not automatically re-enumerate/re-stack the endpoint group
+- cache the last committed Cell screen rectangles and skip endpoint geometry work when the desired Cell rectangle did not change
+- keep explicit Resync as an Advanced recovery action rather than a normal toolbar command
+- rename per-Cell `Unbind` to `Detach` and remove the duplicate per-Cell Close button; applications normally close through their own native X button
+- combine Minimize Group / Restore Group into one stateful toolbar control
+- use compact icon-oriented toolbar controls with tooltips for Identify, group minimize/restore, reset, save, load, and settings
+- add Workspace-local `Ctrl+S` / `Ctrl+O` shortcuts for Save Layout / Load Layout
+- restrict global endpoint assignment modifiers to Ctrl / Alt / Shift combinations; bare F1-F12 and Win-key global shortcuts are rejected
+
+### rc11 performance regression test
+
+1. Bind 4-8 mixed endpoints (for example Firefox, Explorer, Notepad++, Command Prompt, Calculator, Paint).
+2. Continuously resize and move the Workspace; endpoints should follow without the UI feeling significantly sticky.
+3. Drag Cell splitters continuously; native endpoint updates should remain responsive and settle precisely when the mouse is released.
+4. Repeatedly click among bound applications; stable geometry changes must not cause unnecessary Z-order re-stacking or flicker.
+5. Use `Detach` and verify the application remains open and becomes independent from Workspace layout lock.
+6. Verify the application native X closes it and the Cell clears automatically through endpoint-destroy/stale handling.
+7. Verify global shortcut settings require Ctrl, Alt, and/or Shift, detect collisions, and reject bare F-keys / Win-key combinations.
 
 ## rc10 focus — Z-order Stability / Flicker Regression Fix
 
@@ -27,7 +54,7 @@ rc10 is a narrow runtime-stability RC based on mixed-application testing with Fi
 3. Click repeatedly among Paint, Firefox, Explorer, Command Prompt, and other bound endpoints; all other bound endpoints must remain visible.
 4. Resize, move, maximize, and restore the Workspace and drag splitters; endpoints must resync without requiring `Ctrl+Shift+Fx`.
 5. Leave the Workspace idle for several health-timer intervals; stable geometry/Z-order must not trigger visible re-stacking.
-6. Unbind an endpoint and confirm it returns to normal desktop behavior while the remaining endpoint group stays stable.
+6. Detach an endpoint and confirm it returns to normal desktop behavior while the remaining endpoint group stays stable.
 
 ## Security / privacy boundary
 
@@ -74,7 +101,7 @@ Shortcut registration now requires at least one modifier (`Ctrl`, `Shift`, `Alt`
 - Each row has independent horizontal Cell proportions.
 - Row heights can be redistributed independently.
 - Save/Load persists row heights and per-row Cell width proportions.
-- `Reset Tiling` restores equal proportions without dropping bindings.
+- `Reset Cell Layout` restores equal proportions without dropping bindings.
 
 Default 8-Cell topology:
 
@@ -137,9 +164,9 @@ If an endpoint repeatedly refuses the requested geometry, bounded retry/backoff 
 
 ## Lifecycle semantics
 
-- **Unbind:** stop managing the endpoint; application remains open.
-- **Cell Close:** unbind and send graceful `WM_CLOSE` only after critical endpoint identity revalidation.
-- **Reduce Cell count:** endpoints in removed Cells are unbound only; applications remain open.
+- **Detach:** stop managing the endpoint; application remains open.
+- **Application X:** close the application through its own native window controls; endpoint-destroy/stale handling clears the Cell automatically.
+- **Reduce Cell count:** endpoints in removed Cells are detached only; applications remain open.
 - **Load Layout:** proposed state is validated before mutation; a successful load releases current runtime bindings while applications remain open; failed commit attempts roll back the previous working state.
 - **Close Workspace:** after confirmation, still-bound endpoints that pass critical identity revalidation receive graceful `WM_CLOSE`; stale/unverifiable endpoints are deliberately left open.
 

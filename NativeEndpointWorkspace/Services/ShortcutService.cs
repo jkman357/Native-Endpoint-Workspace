@@ -60,11 +60,19 @@ namespace NativeEndpointWorkspace.Services
             int failureCount = 0;
             foreach (var binding in requested.OrderBy(x => x.CellId))
             {
-                // Review #12: do not register bare F1-F12 globally. Those keys are
-                // common application commands (Help/Rename/Refresh/Full Screen/etc.).
-                if (!binding.HasModifier)
+                // rc11 shortcut policy: use Ctrl / Alt / Shift combinations only.
+                // Bare F1-F12 and Win-key global combinations are rejected to reduce
+                // collisions with normal application and Windows shell shortcuts.
+                if (binding.Win)
                 {
-                    binding.Status = "Rejected: at least one modifier is required";
+                    binding.Status = "Rejected: Win modifier is not supported";
+                    failureCount++;
+                    continue;
+                }
+
+                if (!binding.HasSupportedModifier)
+                {
+                    binding.Status = "Rejected: Ctrl, Alt, or Shift is required";
                     failureCount++;
                     continue;
                 }
@@ -129,7 +137,6 @@ namespace NativeEndpointWorkspace.Services
             if (binding.Control) modifiers |= NativeMethods.MOD_CONTROL;
             if (binding.Shift) modifiers |= NativeMethods.MOD_SHIFT;
             if (binding.Alt) modifiers |= NativeMethods.MOD_ALT;
-            if (binding.Win) modifiers |= NativeMethods.MOD_WIN;
             return modifiers;
         }
 

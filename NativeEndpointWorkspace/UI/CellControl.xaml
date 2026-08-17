@@ -18,14 +18,13 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Border Margin="5,4" Padding="7,2" Background="#445064" CornerRadius="3">
                     <TextBlock x:Name="CellNumberText" Foreground="White" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Border>
                 <TextBlock x:Name="EndpointText" Grid.Column="1" Margin="6,0" Foreground="#E7EBF2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                <Button x:Name="UnbindButton" Grid.Column="2" Margin="2,4" Padding="8,0" Content="Unbind" Click="UnbindButton_Click"/>
-                <Button x:Name="CloseButton" Grid.Column="3" Margin="2,4,5,4" Padding="8,0" Content="Close" Click="CloseButton_Click"/>
+                <Button x:Name="DetachButton" Grid.Column="2" Margin="2,4,5,4" Padding="8,0" Content="Detach" Click="DetachButton_Click"
+                        ToolTip="Detach this endpoint from the Cell and leave the application open"/>
             </Grid>
 
             <Border x:Name="EndpointHost" Grid.Row="1" Margin="4" BorderBrush="#3D4655" BorderThickness="1" Background="#15191F" ClipToBounds="True">

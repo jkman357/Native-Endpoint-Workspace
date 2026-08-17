@@ -7,8 +7,7 @@ namespace NativeEndpointWorkspace.UI
 {
     public partial class CellControl : UserControl
     {
-        public event EventHandler UnbindRequested;
-        public event EventHandler CloseRequested;
+        public event EventHandler DetachRequested;
 
         public int CellId { get; private set; }
 
@@ -38,14 +37,9 @@ namespace NativeEndpointWorkspace.UI
             EndpointText.Text = endpoint.DisplayName;
         }
 
-        private void UnbindButton_Click(object sender, RoutedEventArgs e)
+        private void DetachButton_Click(object sender, RoutedEventArgs e)
         {
-            if (UnbindRequested != null) UnbindRequested(this, EventArgs.Empty);
-        }
-
-        private void CloseButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (CloseRequested != null) CloseRequested(this, EventArgs.Empty);
+            if (DetachRequested != null) DetachRequested(this, EventArgs.Empty);
         }
     }
 }
