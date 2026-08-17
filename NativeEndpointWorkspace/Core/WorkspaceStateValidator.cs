@@ -7,7 +7,7 @@ namespace NativeEndpointWorkspace.Core
 {
     public static class WorkspaceStateValidator
     {
-        public static void Validate(WorkspaceState state, int proposedCellCount, IList<ShortcutBinding> proposedShortcuts)
+        public static void ValidateRawState(WorkspaceState state)
         {
             if (state == null)
                 throw new InvalidDataException("Layout file did not contain a WorkspaceState.");
@@ -17,6 +17,14 @@ namespace NativeEndpointWorkspace.Core
                 throw new InvalidDataException("Layout CellCount is outside the supported 1-8 range.");
             if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < WorkspaceConstants.MinimumCellCount || state.Cells.Count > WorkspaceConstants.MaximumCellCount))
                 throw new InvalidDataException("Legacy layout does not provide a valid 1-8 Cell count.");
+
+            ValidateRawShortcutBindings(state.Shortcuts);
+        }
+
+        public static void Validate(WorkspaceState state, int proposedCellCount, IList<ShortcutBinding> proposedShortcuts)
+        {
+            ValidateRawState(state);
+
             if (proposedCellCount < WorkspaceConstants.MinimumCellCount || proposedCellCount > WorkspaceConstants.MaximumCellCount)
                 throw new InvalidDataException("Resolved layout CellCount is outside the supported 1-8 range.");
 
@@ -26,19 +34,7 @@ namespace NativeEndpointWorkspace.Core
                 throw new InvalidDataException("Layout shortcut configuration is incomplete.");
 
             foreach (ShortcutBinding binding in proposedShortcuts)
-            {
-                if (binding == null)
-                    throw new InvalidDataException("Layout contains a null shortcut binding.");
-                if (binding.CellId < 1 || binding.CellId > WorkspaceConstants.MaximumCellCount)
-                    throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
-                if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
-                    binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
-                    throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F8 range.");
-                if (binding.Win)
-                    throw new InvalidDataException("Layout contains a Win-key global shortcut, which is not supported.");
-                if (!binding.HasSupportedModifier)
-                    throw new InvalidDataException("Layout contains a bare global function-key shortcut. Ctrl, Alt, or Shift is required.");
-            }
+                ValidateShortcutBinding(binding);
 
             string duplicate = proposedShortcuts.Where(x => x.CellId <= proposedCellCount)
                 .GroupBy(x => x.ConflictKey)
@@ -47,6 +43,38 @@ namespace NativeEndpointWorkspace.Core
                 .FirstOrDefault();
             if (!string.IsNullOrEmpty(duplicate))
                 throw new InvalidDataException("Layout contains duplicate active shortcut gestures: " + duplicate + ".");
+        }
+
+        public static void ValidateRawShortcutBindings(IList<ShortcutBinding> shortcuts)
+        {
+            if (shortcuts == null)
+                return;
+
+            foreach (ShortcutBinding binding in shortcuts)
+                ValidateShortcutBinding(binding);
+
+            int duplicateCellId = shortcuts
+                .GroupBy(x => x.CellId)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .FirstOrDefault();
+            if (duplicateCellId != 0)
+                throw new InvalidDataException("Layout contains duplicate shortcut entries for Cell " + duplicateCellId + ".");
+        }
+
+        private static void ValidateShortcutBinding(ShortcutBinding binding)
+        {
+            if (binding == null)
+                throw new InvalidDataException("Layout contains a null shortcut binding.");
+            if (binding.CellId < 1 || binding.CellId > WorkspaceConstants.MaximumCellCount)
+                throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
+            if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
+                binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
+                throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F8 range.");
+            if (binding.Win)
+                throw new InvalidDataException("Layout contains a Win-key global shortcut, which is not supported.");
+            if (!binding.HasSupportedModifier)
+                throw new InvalidDataException("Layout contains a bare global function-key shortcut. Ctrl, Alt, or Shift is required.");
         }
 
         public static void ValidateGridLayoutState(GridLayoutState grid, int cellCount)

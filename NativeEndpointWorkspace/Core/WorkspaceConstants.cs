@@ -4,7 +4,7 @@ namespace NativeEndpointWorkspace.Core
 {
     internal static class WorkspaceConstants
     {
-        public const string Version = "0.0.2rc01";
+        public const string Version = "0.0.2rc02";
         public const int LayoutSchemaVersion = 1;
 
         public const int MinimumCellCount = 1;

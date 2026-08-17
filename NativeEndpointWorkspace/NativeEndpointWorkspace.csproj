@@ -63,6 +63,7 @@
     <Compile Include="Core\WorkspaceConstants.cs" />
     <Compile Include="Core\EndpointIdentityPolicy.cs" />
     <Compile Include="Core\GroupVisibilityPolicy.cs" />
+    <Compile Include="Core\WorkspaceBoundsPolicy.cs" />
     <Compile Include="Core\LayoutTopologyPolicy.cs" />
     <Compile Include="Core\LayoutVersionPolicy.cs" />
     <Compile Include="Core\WorkspaceStateValidator.cs" />

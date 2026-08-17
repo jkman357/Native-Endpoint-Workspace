@@ -1,12 +1,12 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.2rc01  
+**Current version:** v0.0.2rc02  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Trial maintenance RC — bug/regression fixes only
 
 Native Endpoint Workspace is a Windows workspace for arranging independent native top-level application windows as adaptive tiled **Native Endpoints**. External applications stay normal top-level windows; the Workspace manages their screen geometry, Cell membership, layout lock, group visibility, and Z-order without embedding or reparenting.
 
-`v0.0.1` remains the immutable frozen trial baseline. `v0.0.2rc01` starts the maintenance line and addresses two review findings only: runtime strong endpoint-identity enforcement and group minimize/restore state correctness.
+`v0.0.1` remains the immutable frozen trial baseline. `v0.0.2rc02` continues the maintenance line: rc01 runtime identity/group-visibility fixes are retained, while rc02 adds raw-before-merge layout validation and full work-area bounds convergence during endpoint minimum-size accommodation.
 
 For release history, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -40,6 +40,7 @@ WPF Workspace
             +-- asynchronous external geometry requests
             +-- single-anchor endpoint-group Z-order
             +-- no-activation group minimize/restore
+            +-- full monitor work-area clamp during Workspace growth
 ```
 
 ## Non-embedding boundary
@@ -116,7 +117,7 @@ Workspace minimize/restore remains a separate lifecycle path with its own tracki
 - Cell headers use clickable `F1` through `F8` badges.
 - Splitters redistribute a fixed Workspace layout area.
 - Each row can have independent horizontal proportions; row heights can also be redistributed.
-- Applications that reject an undersized rectangle can cause their Cell/row allocation to grow; the Workspace may grow within the monitor work area.
+- Applications that reject an undersized rectangle can cause their Cell/row allocation to grow; the Workspace may grow, resize, and reposition as needed while remaining fully bounded by the current monitor work area.
 - Removing an arbitrary Cell reindexes later Cells contiguously and immediately rebuilds the adaptive topology.
 - `Reset Cell Layout` restores equal proportions without dropping bindings.
 
@@ -143,7 +144,7 @@ Ctrl+O  Load Layout
 
 Layout files persist `LayoutSchemaVersion`, application version for provenance, Cell count, adaptive row/Cell proportions, and shortcut mappings. Runtime endpoint handles are never persisted.
 
-`LayoutSchemaVersion` remains independent from the application RC version. Schema version 1 is unchanged in `v0.0.2rc01`. The separate review findings concerning raw shortcut validation order and failure-safe layout save are intentionally **not** changed in this RC.
+`LayoutSchemaVersion` remains independent from the application RC version; schema version 1 is unchanged in `v0.0.2rc02`. Load processing now follows a raw-validate → compatibility-merge → resolved-validate order. Valid older files may still omit shortcut entries and receive defaults, but malformed raw shortcut entries are rejected before merge. Failure-safe/atomic layout persistence remains deferred to a later maintenance RC.
 
 ## DPI baseline
 
@@ -197,18 +198,19 @@ Detailed diagnostics are written to `logs\build.log`.
 test.cmd
 ```
 
-Policy-test output is written to `logs\test.log`. Automated characterization includes strong endpoint identity fail-closed behavior, required runtime strong-check policy, toolbar restore-tracking policy, exact legacy layout-version boundaries, Cell topology, arbitrary Cell removal shifting, destroy tombstoning, hotkey rollback, and unsupported schema rejection.
+Policy-test output is written to `logs\test.log`. Automated characterization includes strong endpoint identity fail-closed behavior, required runtime strong-check policy, toolbar restore-tracking policy, raw-before-merge layout validation, work-area bounds clamping (including negative-coordinate monitors), exact legacy layout-version boundaries, Cell topology, arbitrary Cell removal shifting, destroy tombstoning, hotkey rollback, and unsupported schema rejection.
 
 Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry, actual minimize/restore) still requires real Windows runtime regression testing.
 
-## v0.0.2rc01 regression focus
+## v0.0.2rc02 regression focus
 
 1. Run `test.cmd`; confirm all policy tests PASS and preserve both `logs\build.log` and `logs\test.log`.
-2. Bind mixed apps and exercise move/resize/maximize/restore/splitter operations; confirm no new layout latency or flicker regression.
-3. Minimize one bound app manually, then press group Minimize and group Restore; confirm the manually minimized app stays minimized.
-4. Detach or close an endpoint while it is in the toolbar restore set; confirm the toolbar state converges and does not attempt to restore an unrelated/reused HWND.
-5. Confirm normal binds succeed for standard desktop apps and runtime logs contain no `ENDPOINT_BIND_REJECTED` unless process start identity truly cannot be established.
-6. Confirm closing the Workspace leaves all external applications open.
+2. Load a valid older layout with missing shortcut entries; confirm defaults fill only the missing entries and the layout still loads transactionally.
+3. Load layouts containing a null shortcut, CellId outside F1-F8, unsupported/bare shortcut, or duplicate shortcut CellId; confirm the raw file is rejected before the active Workspace changes.
+4. Place the Workspace near the right/bottom edge, bind an app that rejects a small rectangle, and trigger minimum-size accommodation; confirm Workspace growth repositions as needed and remains fully inside the monitor work area.
+5. Repeat the accommodation test on a secondary monitor, including one positioned left of the primary (negative X) when available.
+6. Re-run rc01 group minimize/restore and strong endpoint-identity regression cases; confirm no maintenance regression.
+7. Confirm closing the Workspace leaves all external applications open.
 
 ## Run
 

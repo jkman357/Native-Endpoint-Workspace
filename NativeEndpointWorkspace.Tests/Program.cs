@@ -17,6 +17,8 @@ namespace NativeEndpointWorkspace.Tests
             Run("Strong identity fails closed when bind-time start time is missing", TestStrongIdentityFailsClosed);
             Run("Runtime identity policy requires strong health and mutation checks", TestStrongRuntimeIdentityPolicy);
             Run("Toolbar restore tracks only endpoints minimized by toolbar", TestToolbarRestoreTrackingPolicy);
+            Run("Raw layout validation rejects malformed shortcuts before merge", TestRawLayoutValidationOrdering);
+            Run("Workspace bounds clamp converges inside monitor work area", TestWorkspaceBoundsClamp);
             Run("Legacy layout version matching is exact", TestLayoutVersionBoundaries);
             Run("Invalid Cell topology fails fast", TestTopologyFailFast);
             Run("Cell and shortcut surface is bounded to 1-8", TestCellAndShortcutBounds);
@@ -56,6 +58,52 @@ namespace NativeEndpointWorkspace.Tests
             AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(true, false));
             AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(false, false));
             AssertTrue(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(false, true));
+        }
+
+        private static void TestRawLayoutValidationOrdering()
+        {
+            var invalidCount = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 99 };
+            AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(invalidCount));
+
+            var invalidCell = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            invalidCell.Shortcuts.Add(Binding(1, true, true, false, 0x70));
+            invalidCell.Shortcuts.Add(Binding(9, true, true, false, 0x71));
+            AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(invalidCell));
+
+            var nullEntry = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            nullEntry.Shortcuts.Add(null);
+            AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(nullEntry));
+
+            var duplicateCell = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            duplicateCell.Shortcuts.Add(Binding(1, true, true, false, 0x70));
+            duplicateCell.Shortcuts.Add(Binding(1, true, false, true, 0x71));
+            AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(duplicateCell));
+
+            var missingEntriesAreCompatible = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            missingEntriesAreCompatible.Shortcuts.Add(Binding(1, true, true, false, 0x70));
+            WorkspaceStateValidator.ValidateRawState(missingEntriesAreCompatible);
+        }
+
+        private static void TestWorkspaceBoundsClamp()
+        {
+            WorkspaceBounds bounded = WorkspaceBoundsPolicy.ClampToWorkArea(
+                1500, 800, 900, 700, 400, 300, 0, 0, 1920, 1080);
+            AssertEqual(1020.0, bounded.Left);
+            AssertEqual(380.0, bounded.Top);
+            AssertEqual(900.0, bounded.Width);
+            AssertEqual(700.0, bounded.Height);
+
+            WorkspaceBounds oversized = WorkspaceBoundsPolicy.ClampToWorkArea(
+                -500, -300, 3000, 2000, 900, 600, -1920, 0, 0, 1080);
+            AssertEqual(-1920.0, oversized.Left);
+            AssertEqual(0.0, oversized.Top);
+            AssertEqual(1920.0, oversized.Width);
+            AssertEqual(1080.0, oversized.Height);
+
+            WorkspaceBounds normalized = WorkspaceBoundsPolicy.ClampToWorkArea(
+                double.NaN, double.PositiveInfinity, 800, 600, 400, 300, 100, 50, 1700, 950);
+            AssertEqual(100.0, normalized.Left);
+            AssertEqual(50.0, normalized.Top);
         }
 
         private static void TestLayoutVersionBoundaries()

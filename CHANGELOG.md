@@ -2,6 +2,19 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. `v0.0.1` is the frozen trial baseline derived from the accepted `v0.0.1rc17` freeze candidate and remains unchanged. Maintenance fixes begin at `v0.0.2rc01`.
 
+## v0.0.2rc02 — Layout State Validation Ordering + Workspace Bounds Convergence
+
+- retained the rc01 strong endpoint-identity runtime enforcement and toolbar-specific minimize/restore tracking
+- added raw serialized layout validation before Cell-count resolution and shortcut compatibility merging
+- reject null, out-of-range, unsupported, and duplicate-Cell shortcut entries before defaults can replace or hide malformed values
+- changed loaded Cell-count resolution from sanitize/default behavior to strict resolution after raw validation
+- retained compatibility merging only for valid but missing shortcut entries, then revalidate the complete resolved state before Workspace mutation
+- added a pure Workspace bounds policy that clamps size and position to the complete monitor work-area rectangle
+- updated minimum-size accommodation so Workspace growth can also reposition Left/Top and converge back inside the monitor work area instead of only limiting Width/Height
+- added regression coverage for raw-before-merge validation and work-area bounds clamping, including negative-coordinate monitor geometry
+- advanced application/runtime/source metadata to `v0.0.2rc02`
+- intentionally deferred failure-safe/atomic layout persistence to a later maintenance RC
+
 ## v0.0.2rc01 — Endpoint Identity Runtime Enforcement + Group Visibility State Correctness
 
 - started the maintenance RC line from frozen `v0.0.1`; no changes are made to the frozen release itself

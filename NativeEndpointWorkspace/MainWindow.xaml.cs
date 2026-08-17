@@ -732,10 +732,21 @@ namespace NativeEndpointWorkspace
             {
                 double scaleX, scaleY;
                 GetDeviceScale(WorkspaceGrid, out scaleX, out scaleY);
-                double maxWidth = Math.Max(MinWidth, (workRight - workLeft) / scaleX);
-                double maxHeight = Math.Max(MinHeight, (workBottom - workTop) / scaleY);
-                targetWidth = Math.Min(targetWidth, maxWidth);
-                targetHeight = Math.Min(targetHeight, maxHeight);
+                WorkspaceBounds bounded = WorkspaceBoundsPolicy.ClampToWorkArea(
+                    Left, Top, targetWidth, targetHeight, MinWidth, MinHeight,
+                    workLeft / scaleX, workTop / scaleY, workRight / scaleX, workBottom / scaleY);
+                targetWidth = bounded.Width;
+                targetHeight = bounded.Height;
+
+                if (double.IsNaN(Width) || double.IsInfinity(Width) || Math.Abs(Width - targetWidth) > 1)
+                    Width = targetWidth;
+                if (double.IsNaN(Height) || double.IsInfinity(Height) || Math.Abs(Height - targetHeight) > 1)
+                    Height = targetHeight;
+                if (double.IsNaN(Left) || double.IsInfinity(Left) || Math.Abs(Left - bounded.Left) > 1)
+                    Left = bounded.Left;
+                if (double.IsNaN(Top) || double.IsInfinity(Top) || Math.Abs(Top - bounded.Top) > 1)
+                    Top = bounded.Top;
+                return;
             }
 
             if (targetWidth > Width + 1)
@@ -1563,11 +1574,12 @@ namespace NativeEndpointWorkspace
             try
             {
                 WorkspaceState state = _layoutService.Load(dialog.FileName);
-                int proposedCellCount = ResolveLoadedCellCount(state);
-                IList<ShortcutBinding> proposedShortcuts = MergeLoadedShortcutBindings(state == null ? null : state.Shortcuts);
 
-                // The raw-shortcut validation ordering finding is intentionally deferred to
-                // a later maintenance RC; rc01 changes only identity and group visibility.
+                // Validate serialized values before compatibility resolution/merging so malformed
+                // input cannot be filtered, clamped, or replaced by defaults before inspection.
+                WorkspaceStateValidator.ValidateRawState(state);
+                int proposedCellCount = ResolveLoadedCellCount(state);
+                IList<ShortcutBinding> proposedShortcuts = MergeLoadedShortcutBindings(state.Shortcuts);
                 WorkspaceStateValidator.Validate(state, proposedCellCount, proposedShortcuts);
 
                 foreach (NativeEndpoint endpoint in oldEndpoints)
@@ -1658,15 +1670,15 @@ namespace NativeEndpointWorkspace
         private static int ResolveLoadedCellCount(WorkspaceState state)
         {
             if (state == null)
-                return WorkspaceConstants.DefaultCellCount;
+                throw new InvalidDataException("Layout file did not contain a WorkspaceState.");
 
-            if (state.CellCount >= WorkspaceConstants.MinimumCellCount && state.CellCount <= WorkspaceConstants.MaximumCellCount)
+            if (state.CellCount != 0)
                 return state.CellCount;
 
-            if (state.Cells != null && state.Cells.Count >= WorkspaceConstants.MinimumCellCount)
-                return Math.Max(WorkspaceConstants.MinimumCellCount, Math.Min(WorkspaceConstants.MaximumCellCount, state.Cells.Count));
+            if (state.Cells != null)
+                return state.Cells.Count;
 
-            return WorkspaceConstants.DefaultCellCount;
+            throw new InvalidDataException("Legacy layout does not provide a Cell count.");
         }
 
         private IList<ShortcutBinding> MergeLoadedShortcutBindings(IList<ShortcutBinding> loaded)
@@ -1675,7 +1687,7 @@ namespace NativeEndpointWorkspace
             var byCell = defaults.ToDictionary(x => x.CellId, x => x);
             if (loaded != null)
             {
-                foreach (ShortcutBinding binding in loaded.Where(x => x != null && x.CellId >= 1 && x.CellId <= WorkspaceConstants.MaximumCellCount))
+                foreach (ShortcutBinding binding in loaded)
                     byCell[binding.CellId] = binding.Clone();
             }
             return byCell.Values.OrderBy(x => x.CellId).ToList();
