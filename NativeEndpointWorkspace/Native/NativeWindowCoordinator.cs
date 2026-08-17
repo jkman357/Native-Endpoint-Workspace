@@ -187,6 +187,72 @@ namespace NativeEndpointWorkspace.Native
                 NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_ASYNCWINDOWPOS);
         }
 
+        // Analyze the normal top-level Z-order without changing it. Enumeration starts at
+        // the top and walks downward. The invariant is satisfied only when every supplied
+        // managed endpoint is above the opaque Workspace. bottomMostEndpoint is the managed
+        // endpoint nearest the Workspace and is the only anchor needed for a correction.
+        public bool TryAnalyzeEndpointGroupZOrder(
+            IntPtr workspaceHwnd,
+            NativeEndpoint[] endpoints,
+            out bool workspaceBelowAllEndpoints,
+            out NativeEndpoint bottomMostEndpoint)
+        {
+            workspaceBelowAllEndpoints = false;
+            bottomMostEndpoint = null;
+
+            if (!IsValidWindow(workspaceHwnd) || endpoints == null || endpoints.Length == 0)
+                return false;
+
+            var managedByHandle = new System.Collections.Generic.Dictionary<IntPtr, NativeEndpoint>();
+            foreach (NativeEndpoint endpoint in endpoints)
+            {
+                if (endpoint == null || !IsEndpointIdentityCurrent(endpoint, false))
+                    continue;
+                managedByHandle[endpoint.Handle] = endpoint;
+            }
+
+            if (managedByHandle.Count == 0)
+                return false;
+
+            int workspaceOrder = -1;
+            int bottomMostEndpointOrder = -1;
+            int foundEndpointCount = 0;
+            int order = 0;
+            int guard = 0;
+            IntPtr current = NativeMethods.GetTopWindow(IntPtr.Zero);
+
+            // Defensive guard prevents an unexpected native enumeration anomaly from
+            // becoming an unbounded loop on the caller's UI thread.
+            while (current != IntPtr.Zero && guard++ < WorkspaceConstants.MaximumZOrderEnumerationWindows)
+            {
+                if (current == workspaceHwnd)
+                    workspaceOrder = order;
+
+                NativeEndpoint endpoint;
+                if (managedByHandle.TryGetValue(current, out endpoint))
+                {
+                    foundEndpointCount++;
+                    if (order > bottomMostEndpointOrder)
+                    {
+                        bottomMostEndpointOrder = order;
+                        bottomMostEndpoint = endpoint;
+                    }
+                }
+
+                if (workspaceOrder >= 0 && foundEndpointCount == managedByHandle.Count)
+                    break;
+
+                current = NativeMethods.GetWindow(current, NativeMethods.GW_HWNDNEXT);
+                order++;
+            }
+
+            if (workspaceOrder < 0 || foundEndpointCount != managedByHandle.Count || bottomMostEndpoint == null)
+                return false;
+
+            workspaceBelowAllEndpoints = bottomMostEndpointOrder < workspaceOrder;
+            return true;
+        }
+
         public bool PlaceWorkspaceBehindEndpoint(IntPtr workspaceHwnd, NativeEndpoint endpointAbove)
         {
             int ignoredError;

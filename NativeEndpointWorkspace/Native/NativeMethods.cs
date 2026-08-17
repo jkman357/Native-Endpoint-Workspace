@@ -25,6 +25,7 @@ namespace NativeEndpointWorkspace.Native
         internal const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
         internal static readonly IntPtr HWND_TOP = IntPtr.Zero;
+        internal const uint GW_HWNDNEXT = 2;
 
         internal const int SW_SHOWNOACTIVATE = 4;
         internal const int SW_SHOWMINNOACTIVE = 7;
@@ -61,6 +62,12 @@ namespace NativeEndpointWorkspace.Native
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetTopWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

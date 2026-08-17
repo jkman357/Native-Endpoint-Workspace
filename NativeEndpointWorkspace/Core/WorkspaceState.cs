@@ -10,7 +10,7 @@ namespace NativeEndpointWorkspace.Core
         public int CellCount { get; set; }
         public GridLayoutState Grid { get; set; }
 
-        // Kept for rc01/rc02 layout-file compatibility. rc09 continues to avoid free-form
+        // Kept for rc01/rc02 layout-file compatibility. rc10 continues to avoid free-form
         // Cell geometry because Cells are constrained to the tiled Workspace grid.
         public List<CellLayoutState> Cells { get; set; }
         public List<ShortcutBinding> Shortcuts { get; set; }

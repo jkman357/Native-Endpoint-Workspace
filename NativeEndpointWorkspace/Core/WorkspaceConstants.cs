@@ -4,7 +4,7 @@ namespace NativeEndpointWorkspace.Core
 {
     internal static class WorkspaceConstants
     {
-        public const string Version = "0.0.1rc09";
+        public const string Version = "0.0.1rc10";
         public const string LayoutVersionCompatibilityPrefix = "0.0.1";
 
         public const int MinimumCellCount = 4;
@@ -27,6 +27,7 @@ namespace NativeEndpointWorkspace.Core
         public const int WindowRectangleTolerance = 3;
         public const int WindowTextCapacity = 512;
         public const int WindowClassCapacity = 256;
+        public const int MaximumZOrderEnumerationWindows = 4096;
 
         public const int MaximumCorrectionsPerBurst = 4;
         public static readonly TimeSpan CorrectionBurstWindow = TimeSpan.FromMilliseconds(1500);

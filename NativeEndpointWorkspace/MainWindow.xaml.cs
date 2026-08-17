@@ -78,8 +78,8 @@ namespace NativeEndpointWorkspace
             _layoutLockService.ForegroundChanged += LayoutLockService_ForegroundChanged;
             _layoutLockService.WindowDestroyed += LayoutLockService_WindowDestroyed;
 
-            // Slow health fallback only. rc09 keeps rc06's deterministic LayoutUpdated
-            // commit path and adds identity/backoff hardening around native endpoints.
+            // Slow health fallback only. rc10 keeps the deterministic LayoutUpdated commit
+            // path, but the timer corrects only an observed geometry/Z-order violation.
             _windowHealthTimer = new DispatcherTimer { Interval = WorkspaceConstants.EndpointHealthInterval };
             _windowHealthTimer.Tick += WindowHealthTimer_Tick;
             WorkspaceGrid.LayoutUpdated += WorkspaceGrid_LayoutUpdated;
@@ -785,8 +785,9 @@ namespace NativeEndpointWorkspace
             QueueNativeLayoutCommit(showCompletionStatus);
         }
 
-        // rc09 preserves rc06's deterministic WPF geometry-fingerprint commit path.
-        // Endpoint identity validation and bounded correction backoff now guard the native side.
+        // rc10 preserves the deterministic WPF geometry-fingerprint commit path.
+        // Native calls remain no-ops when geometry already matches, and Z-order is corrected
+        // only when the endpoint-group invariant is actually broken.
         private void WorkspaceGrid_LayoutUpdated(object sender, EventArgs e)
         {
             if (!_initialLayoutApplied || _buildingGrid || _committingNativeLayout || _workspaceCloseAccepted || WindowState == WindowState.Minimized)
@@ -911,38 +912,96 @@ namespace NativeEndpointWorkspace
             if (!IsWorkspaceGroupForeground(foreground))
                 return;
 
-            NativeEndpoint[] endpoints = _registry.All()
-                .Where(x => x.CellId <= _cellCount &&
-                            _windowCoordinator.IsEndpointIdentityCurrent(x, false) &&
-                            !_windowCoordinator.IsMinimized(x) &&
-                            !_windowCoordinator.IsHung(x))
-                .OrderBy(x => x.CellId)
-                .ToArray();
+            NativeEndpoint[] endpoints = GetHealthyVisibleEndpoints();
             if (endpoints.Length == 0)
                 return;
 
             _normalizingZOrder = true;
             try
             {
-                // rc09 maintains the endpoint group by moving only our own opaque WPF
-                // Workspace behind each valid endpoint. This avoids asynchronous cross-process
-                // endpoint raises racing one another while preserving the user's naturally
-                // activated endpoint at the front of the group.
-                foreach (NativeEndpoint endpoint in endpoints)
+                bool workspaceBelowAllEndpoints;
+                NativeEndpoint bottomMostEndpoint;
+                if (!_windowCoordinator.TryAnalyzeEndpointGroupZOrder(
+                    _workspaceHwnd, endpoints, out workspaceBelowAllEndpoints, out bottomMostEndpoint))
                 {
-                    int nativeErrorCode;
-                    if (!_windowCoordinator.PlaceWorkspaceBehindEndpoint(_workspaceHwnd, endpoint, out nativeErrorCode) && commitResult != null)
+                    if (commitResult != null)
                     {
                         commitResult.ZOrderFailureCount++;
-                        commitResult.Failures.Add("Cell " + endpoint.CellId + " Z-order anchor failed" +
-                            (nativeErrorCode != 0 ? " (Win32 " + nativeErrorCode + ")" : string.Empty));
+                        commitResult.Failures.Add("Endpoint-group Z-order could not be analyzed.");
                     }
+                    return;
+                }
+
+                // rc10 invariant: do nothing while every healthy endpoint is already above
+                // the Workspace. If correction is required, move the Workspace exactly once
+                // behind the bottom-most managed endpoint. This avoids the visible flicker
+                // caused by moving the opaque Workspace once per endpoint.
+                if (workspaceBelowAllEndpoints)
+                    return;
+
+                int nativeErrorCode;
+                if (!_windowCoordinator.PlaceWorkspaceBehindEndpoint(
+                    _workspaceHwnd, bottomMostEndpoint, out nativeErrorCode) && commitResult != null)
+                {
+                    commitResult.ZOrderFailureCount++;
+                    commitResult.Failures.Add("Endpoint-group Z-order anchor failed at Cell " +
+                        bottomMostEndpoint.CellId +
+                        (nativeErrorCode != 0 ? " (Win32 " + nativeErrorCode + ")" : string.Empty));
                 }
             }
             finally
             {
                 _normalizingZOrder = false;
             }
+        }
+
+        private NativeEndpoint[] GetHealthyVisibleEndpoints()
+        {
+            return _registry.All()
+                .Where(x => x.CellId <= _cellCount &&
+                            _windowCoordinator.IsEndpointIdentityCurrent(x, false) &&
+                            !_windowCoordinator.IsMinimized(x) &&
+                            !_windowCoordinator.IsHung(x))
+                .OrderBy(x => x.CellId)
+                .ToArray();
+        }
+
+        private bool HasNativeLayoutViolation()
+        {
+            if (!_initialLayoutApplied || _buildingGrid || _workspaceCloseAccepted || WindowState == WindowState.Minimized)
+                return false;
+
+            WorkspaceGrid.UpdateLayout();
+            NativeEndpoint[] endpoints = GetHealthyVisibleEndpoints();
+            if (endpoints.Length == 0)
+                return false;
+
+            foreach (NativeEndpoint endpoint in endpoints)
+            {
+                CellControl cell;
+                if (!_cells.TryGetValue(endpoint.CellId, out cell))
+                    continue;
+
+                FrameworkElement host = cell.EndpointHostElement;
+                if (host == null || !host.IsVisible || host.ActualWidth < 2 || host.ActualHeight < 2)
+                    continue;
+
+                Rect bounds = GetElementScreenBounds(host);
+                int x = (int)Math.Round(bounds.Left);
+                int y = (int)Math.Round(bounds.Top);
+                int width = (int)Math.Round(bounds.Width);
+                int height = (int)Math.Round(bounds.Height);
+                if (!_windowCoordinator.IsAtRectangle(endpoint, x, y, width, height))
+                    return true;
+            }
+
+            bool workspaceBelowAllEndpoints;
+            NativeEndpoint bottomMostEndpoint;
+            if (!_windowCoordinator.TryAnalyzeEndpointGroupZOrder(
+                _workspaceHwnd, endpoints, out workspaceBelowAllEndpoints, out bottomMostEndpoint))
+                return true;
+
+            return !workspaceBelowAllEndpoints;
         }
 
         private void ScheduleEndpointGroupNormalize()
@@ -1070,8 +1129,10 @@ namespace NativeEndpointWorkspace
             foreach (IntPtr stale in _locationCorrectionSuppressedUntil.Where(x => nowUtc > x.Value.AddSeconds(2)).Select(x => x.Key).ToArray())
                 _locationCorrectionSuppressedUntil.Remove(stale);
 
-            // Low-frequency fallback for apps that do not emit location/layout events.
-            if (IsWorkspaceGroupForeground(_windowCoordinator.GetForegroundWindow()))
+            // Low-frequency health fallback is detection-only while the group is stable.
+            // Reapply native layout only when geometry or the endpoint-group Z-order invariant
+            // is observed to be broken; idle healthy endpoints receive no SetWindowPos calls.
+            if (IsWorkspaceGroupForeground(_windowCoordinator.GetForegroundWindow()) && HasNativeLayoutViolation())
                 CommitNativeLayout(false);
         }
 

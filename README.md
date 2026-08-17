@@ -1,11 +1,33 @@
 # Native Endpoint Workspace
 
-**Version:** v0.0.1rc09  
+**Version:** v0.0.1rc10  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2
 
 Native Endpoint Workspace is a Windows technical POC for arranging and managing independent native top-level application windows as adaptive tiled **Native Endpoints** without embedding or reparenting them.
 
 Firefox, Windows Explorer, Notepad++, VS Code, Terminal and similar applications remain normal top-level windows. The Workspace manages their screen geometry, layout membership, group visibility/Z-order, and bound-window lifecycle policy.
+
+## rc10 focus — Z-order Stability / Flicker Regression Fix
+
+rc10 is a narrow runtime-stability RC based on mixed-application testing with Firefox, Paint, Explorer, Command Prompt, and other native endpoints. It does not add new product features.
+
+- preserve rc09 review-hardening behavior and endpoint identity validation
+- replace per-endpoint Workspace Z-order moves with a single bottom-most endpoint anchor
+- inspect the current top-level Z-order before changing it
+- perform no Z-order native call when all healthy managed endpoints are already above the Workspace
+- make the periodic health path detection-only while geometry and Z-order are healthy
+- invoke a native layout correction only after an actual geometry or Z-order invariant violation is detected
+- retain rectangle equality checks so stable endpoint geometry does not generate repeated `SetWindowPos` calls
+- keep the non-embedding architecture and no-activation focus policy
+
+### rc10 regression test
+
+1. Bind Paint to Cell 1 and Firefox to Cell 2; leave the Workspace idle and verify neither endpoint periodically flickers.
+2. Bind Explorer to another Cell and verify adding/using Explorer does not make Paint or Firefox blink behind the Workspace.
+3. Click repeatedly among Paint, Firefox, Explorer, Command Prompt, and other bound endpoints; all other bound endpoints must remain visible.
+4. Resize, move, maximize, and restore the Workspace and drag splitters; endpoints must resync without requiring `Ctrl+Shift+Fx`.
+5. Leave the Workspace idle for several health-timer intervals; stable geometry/Z-order must not trigger visible re-stacking.
+6. Unbind an endpoint and confirm it returns to normal desktop behavior while the remaining endpoint group stays stable.
 
 ## Security / privacy boundary
 
@@ -196,7 +218,7 @@ The POC starts on .NET Framework 4.7.2 for compatibility with the initial test m
 
 ## Current maturity
 
-**POC / hardening stage.** rc09 preserves the working rc08 Native Endpoint layout model and closes the planned static-review cleanup tranche (#8, #9, #11, #12). A fresh full review is required before declaring the original 12 findings closed as a set; rc09 does not claim production readiness by itself.
+**POC / hardening stage.** rc10 preserves the rc09 static-review cleanup and applies a narrow Z-order stability correction after mixed-endpoint runtime testing exposed visible flicker. A fresh full review is still required before declaring the original 12 findings closed as a set; rc10 does not claim production readiness by itself.
 
 ## License
 
