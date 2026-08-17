@@ -26,8 +26,10 @@ namespace NativeEndpointWorkspace.Native
 
         internal static readonly IntPtr HWND_TOP = IntPtr.Zero;
 
-        internal const int SW_MINIMIZE = 6;
-        internal const int SW_RESTORE = 9;
+        internal const int SW_SHOWNOACTIVATE = 4;
+        internal const int SW_SHOWMINNOACTIVE = 7;
+
+        internal const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
 
         internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
         internal const uint EVENT_OBJECT_DESTROY = 0x8001;
@@ -43,6 +45,15 @@ namespace NativeEndpointWorkspace.Native
             internal int Top;
             internal int Right;
             internal int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        internal struct MONITORINFO
+        {
+            internal int cbSize;
+            internal RECT rcMonitor;
+            internal RECT rcWork;
+            internal uint dwFlags;
         }
 
         internal delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
@@ -88,6 +99,14 @@ namespace NativeEndpointWorkspace.Native
 
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

@@ -72,6 +72,7 @@
     <Compile Include="Core\EndpointIdentityStatus.cs" />
     <Compile Include="Core\GeometrySyncResult.cs" />
     <Compile Include="Core\EndpointCorrectionState.cs" />
+    <Compile Include="Core\NativeLayoutCommitResult.cs" />
     <Compile Include="Core\ShortcutBinding.cs" />
     <Compile Include="Core\WorkspaceState.cs" />
     <Compile Include="Native\NativeMethods.cs" />

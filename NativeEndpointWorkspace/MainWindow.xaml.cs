@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,8 +23,13 @@ namespace NativeEndpointWorkspace
         private const int MaxCellCount = 12;
         private const int DefaultCellCount = 8;
         private const double SplitterSize = 6.0;
+        private const double DefaultCellMinWidth = 155.0;
+        private const double DefaultRowMinHeight = 115.0;
+        private const double SizeVerificationPositionTolerance = 20.0;
+        private const double SizeVerificationGrowthTolerance = 8.0;
         private static readonly TimeSpan LocationCorrectionSuppression = TimeSpan.FromMilliseconds(180);
         private static readonly TimeSpan EndpointHealthInterval = TimeSpan.FromMilliseconds(1250);
+        private static readonly TimeSpan EndpointSizeVerificationDelay = TimeSpan.FromMilliseconds(220);
 
         private readonly NativeWindowCoordinator _windowCoordinator = new NativeWindowCoordinator();
         private readonly EndpointRegistry _registry = new EndpointRegistry();
@@ -32,6 +38,11 @@ namespace NativeEndpointWorkspace
         private readonly Dictionary<int, CellControl> _cells = new Dictionary<int, CellControl>();
         private readonly Dictionary<int, Grid> _rowGrids = new Dictionary<int, Grid>();
         private readonly Dictionary<int, List<int>> _rowCellIds = new Dictionary<int, List<int>>();
+        private readonly Dictionary<int, ColumnDefinition> _cellColumns = new Dictionary<int, ColumnDefinition>();
+        private readonly Dictionary<int, int> _cellLogicalRows = new Dictionary<int, int>();
+        private readonly Dictionary<int, double> _cellMinimumHostWidths = new Dictionary<int, double>();
+        private readonly Dictionary<int, double> _cellMinimumHostHeights = new Dictionary<int, double>();
+        private readonly Dictionary<IntPtr, DispatcherTimer> _sizeVerificationTimers = new Dictionary<IntPtr, DispatcherTimer>();
         private readonly Dictionary<IntPtr, DateTime> _locationCorrectionSuppressedUntil = new Dictionary<IntPtr, DateTime>();
         private readonly Dictionary<IntPtr, EndpointCorrectionState> _correctionStates = new Dictionary<IntPtr, EndpointCorrectionState>();
         private readonly HashSet<IntPtr> _pendingLocationCorrections = new HashSet<IntPtr>();
@@ -77,7 +88,7 @@ namespace NativeEndpointWorkspace
             _layoutLockService.ForegroundChanged += LayoutLockService_ForegroundChanged;
             _layoutLockService.WindowDestroyed += LayoutLockService_WindowDestroyed;
 
-            // Slow health fallback only. rc07 keeps rc06's deterministic LayoutUpdated
+            // Slow health fallback only. rc08 keeps rc06's deterministic LayoutUpdated
             // commit path and adds identity/backoff hardening around native endpoints.
             _windowHealthTimer = new DispatcherTimer { Interval = EndpointHealthInterval };
             _windowHealthTimer.Tick += WindowHealthTimer_Tick;
@@ -108,6 +119,7 @@ namespace NativeEndpointWorkspace
 
             RefreshManagedHandleSnapshot();
             bool hookStarted = _layoutLockService.Start();
+            ApplyEndpointMinimumConstraints();
             ScheduleGeometrySync();
             ScheduleEndpointGroupNormalize();
 
@@ -167,6 +179,8 @@ namespace NativeEndpointWorkspace
                 WorkspaceGrid.RowDefinitions.Clear();
                 _rowGrids.Clear();
                 _rowCellIds.Clear();
+                _cellColumns.Clear();
+                _cellLogicalRows.Clear();
 
                 WorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -186,7 +200,7 @@ namespace NativeEndpointWorkspace
                     WorkspaceGrid.RowDefinitions.Add(new RowDefinition
                     {
                         Height = new GridLength(rowWeight, GridUnitType.Star),
-                        MinHeight = 115
+                        MinHeight = DefaultRowMinHeight
                     });
 
                     var rowGrid = new Grid
@@ -208,13 +222,16 @@ namespace NativeEndpointWorkspace
                         else if (requestedState != null && requestedState.ColumnWeights != null && requestedState.ColumnWeights.Count >= cellsInRow)
                             columnWeight = Math.Max(1.0, requestedState.ColumnWeights[column]);
 
-                        rowGrid.ColumnDefinitions.Add(new ColumnDefinition
+                        var cellColumn = new ColumnDefinition
                         {
                             Width = new GridLength(columnWeight, GridUnitType.Star),
-                            MinWidth = 155
-                        });
+                            MinWidth = DefaultCellMinWidth
+                        };
+                        rowGrid.ColumnDefinitions.Add(cellColumn);
 
                         int cellId = nextCellId++;
+                        _cellColumns[cellId] = cellColumn;
+                        _cellLogicalRows[cellId] = logicalRow;
                         _rowCellIds[logicalRow].Add(cellId);
                         CellControl cell = _cells[cellId];
                         Grid.SetColumn(cell, column * 2);
@@ -253,6 +270,7 @@ namespace NativeEndpointWorkspace
                 _buildingGrid = false;
             }
 
+            ApplyEndpointMinimumConstraints();
             ScheduleGeometrySync();
             ScheduleEndpointGroupNormalize();
         }
@@ -439,6 +457,206 @@ namespace NativeEndpointWorkspace
             _pendingLocationCorrections.Remove(endpoint.Handle);
             _correctionStates.Remove(endpoint.Handle);
             _minimizedWithWorkspace.Remove(endpoint.Handle);
+
+            DispatcherTimer sizeTimer;
+            if (_sizeVerificationTimers.TryGetValue(endpoint.Handle, out sizeTimer))
+            {
+                sizeTimer.Stop();
+                _sizeVerificationTimers.Remove(endpoint.Handle);
+            }
+
+            _cellMinimumHostWidths.Remove(endpoint.CellId);
+            _cellMinimumHostHeights.Remove(endpoint.CellId);
+            ApplyEndpointMinimumConstraints();
+        }
+
+        private void ScheduleEndpointSizeVerification(NativeEndpoint endpoint)
+        {
+            if (endpoint == null || _workspaceCloseAccepted)
+                return;
+
+            DispatcherTimer oldTimer;
+            if (_sizeVerificationTimers.TryGetValue(endpoint.Handle, out oldTimer))
+                oldTimer.Stop();
+
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = EndpointSizeVerificationDelay
+            };
+            timer.Tick += delegate
+            {
+                timer.Stop();
+                _sizeVerificationTimers.Remove(endpoint.Handle);
+                VerifyEndpointSizeAccommodation(endpoint);
+            };
+            _sizeVerificationTimers[endpoint.Handle] = timer;
+            timer.Start();
+        }
+
+        private void VerifyEndpointSizeAccommodation(NativeEndpoint endpoint)
+        {
+            if (endpoint == null || _workspaceCloseAccepted || WindowState == WindowState.Minimized)
+                return;
+
+            NativeEndpoint current = _registry.GetByCell(endpoint.CellId);
+            if (current == null || current.Handle != endpoint.Handle || !_windowCoordinator.IsEndpointIdentityCurrent(current, false))
+                return;
+
+            Rect desired;
+            if (!TryGetDesiredCellScreenRect(endpoint.CellId, out desired))
+                return;
+
+            int actualX, actualY, actualWidth, actualHeight;
+            if (!_windowCoordinator.TryGetWindowRectangle(current, out actualX, out actualY, out actualWidth, out actualHeight))
+                return;
+
+            bool positionAccepted = Math.Abs(actualX - desired.Left) <= SizeVerificationPositionTolerance &&
+                                    Math.Abs(actualY - desired.Top) <= SizeVerificationPositionTolerance;
+            bool widthRejected = actualWidth > desired.Width + SizeVerificationGrowthTolerance;
+            bool heightRejected = actualHeight > desired.Height + SizeVerificationGrowthTolerance;
+            if (!positionAccepted || (!widthRejected && !heightRejected))
+                return;
+
+            if (ApplyEndpointSizeAccommodation(endpoint.CellId,
+                widthRejected ? actualWidth : (int)Math.Ceiling(desired.Width),
+                heightRejected ? actualHeight : (int)Math.Ceiling(desired.Height)))
+            {
+                GetCorrectionState(endpoint.Handle).Reset();
+                StatusText.Text = "Cell " + endpoint.CellId + ": endpoint minimum size detected; Workspace/Cell allocation adjusted.";
+                QueueNativeLayoutCommit(false);
+            }
+        }
+
+        private bool TryGetDesiredCellScreenRect(int cellId, out Rect bounds)
+        {
+            bounds = Rect.Empty;
+            CellControl cell;
+            if (!_cells.TryGetValue(cellId, out cell))
+                return false;
+
+            FrameworkElement host = cell.EndpointHostElement;
+            if (host == null || !host.IsVisible || host.ActualWidth < 2 || host.ActualHeight < 2)
+                return false;
+
+            bounds = GetElementScreenBounds(host);
+            return !bounds.IsEmpty && bounds.Width > 1 && bounds.Height > 1;
+        }
+
+        private bool ApplyEndpointSizeAccommodation(int cellId, int requiredHostWidthPixels, int requiredHostHeightPixels)
+        {
+            CellControl cell;
+            if (!_cells.TryGetValue(cellId, out cell))
+                return false;
+
+            FrameworkElement host = cell.EndpointHostElement;
+            double scaleX, scaleY;
+            GetDeviceScale(host, out scaleX, out scaleY);
+
+            double requiredHostWidthDip = requiredHostWidthPixels / scaleX;
+            double requiredHostHeightDip = requiredHostHeightPixels / scaleY;
+            double outerWidthOverhead = Math.Max(0, cell.ActualWidth - host.ActualWidth);
+            double outerHeightOverhead = Math.Max(0, cell.ActualHeight - host.ActualHeight);
+            double requestedCellWidth = requiredHostWidthDip + outerWidthOverhead;
+            double requestedRowHeight = requiredHostHeightDip + outerHeightOverhead;
+
+            double oldWidth;
+            double oldHeight;
+            _cellMinimumHostWidths.TryGetValue(cellId, out oldWidth);
+            _cellMinimumHostHeights.TryGetValue(cellId, out oldHeight);
+
+            bool changed = requestedCellWidth > oldWidth + 1 || requestedRowHeight > oldHeight + 1;
+            if (!changed)
+                return false;
+
+            _cellMinimumHostWidths[cellId] = Math.Max(oldWidth, requestedCellWidth);
+            _cellMinimumHostHeights[cellId] = Math.Max(oldHeight, requestedRowHeight);
+            ApplyEndpointMinimumConstraints();
+            EnsureWorkspaceCapacityForMinimums();
+            return true;
+        }
+
+        private void ApplyEndpointMinimumConstraints()
+        {
+            foreach (KeyValuePair<int, ColumnDefinition> pair in _cellColumns)
+            {
+                double required;
+                pair.Value.MinWidth = _cellMinimumHostWidths.TryGetValue(pair.Key, out required)
+                    ? Math.Max(DefaultCellMinWidth, required)
+                    : DefaultCellMinWidth;
+            }
+
+            for (int logicalRow = 0; logicalRow < _rowCount; logicalRow++)
+            {
+                int rowDefinitionIndex = logicalRow * 2;
+                if (rowDefinitionIndex >= WorkspaceGrid.RowDefinitions.Count)
+                    continue;
+
+                double requiredRowHeight = DefaultRowMinHeight;
+                List<int> cellIds;
+                if (_rowCellIds.TryGetValue(logicalRow, out cellIds))
+                {
+                    foreach (int cellId in cellIds)
+                    {
+                        double required;
+                        if (_cellMinimumHostHeights.TryGetValue(cellId, out required))
+                            requiredRowHeight = Math.Max(requiredRowHeight, required);
+                    }
+                }
+                WorkspaceGrid.RowDefinitions[rowDefinitionIndex].MinHeight = requiredRowHeight;
+            }
+        }
+
+        private void EnsureWorkspaceCapacityForMinimums()
+        {
+            if (!IsLoaded || WindowState != WindowState.Normal)
+                return;
+
+            double requiredGridWidth = 0;
+            foreach (KeyValuePair<int, Grid> rowPair in _rowGrids)
+            {
+                double rowWidth = 0;
+                foreach (ColumnDefinition column in rowPair.Value.ColumnDefinitions)
+                    rowWidth += column.Width.IsAbsolute ? column.Width.Value : column.MinWidth;
+                requiredGridWidth = Math.Max(requiredGridWidth, rowWidth);
+            }
+
+            double requiredGridHeight = 0;
+            foreach (RowDefinition row in WorkspaceGrid.RowDefinitions)
+                requiredGridHeight += row.Height.IsAbsolute ? row.Height.Value : row.MinHeight;
+
+            double chromeWidth = Math.Max(0, ActualWidth - WorkspaceGrid.ActualWidth);
+            double chromeHeight = Math.Max(0, ActualHeight - WorkspaceGrid.ActualHeight);
+            double targetWidth = Math.Max(Width, requiredGridWidth + chromeWidth);
+            double targetHeight = Math.Max(Height, requiredGridHeight + chromeHeight);
+
+            int workLeft, workTop, workRight, workBottom;
+            if (_windowCoordinator.TryGetMonitorWorkArea(_workspaceHwnd, out workLeft, out workTop, out workRight, out workBottom))
+            {
+                double scaleX, scaleY;
+                GetDeviceScale(WorkspaceGrid, out scaleX, out scaleY);
+                double maxWidth = Math.Max(MinWidth, (workRight - workLeft) / scaleX);
+                double maxHeight = Math.Max(MinHeight, (workBottom - workTop) / scaleY);
+                targetWidth = Math.Min(targetWidth, maxWidth);
+                targetHeight = Math.Min(targetHeight, maxHeight);
+            }
+
+            if (targetWidth > Width + 1)
+                Width = targetWidth;
+            if (targetHeight > Height + 1)
+                Height = targetHeight;
+        }
+
+        private static void GetDeviceScale(Visual visual, out double scaleX, out double scaleY)
+        {
+            scaleX = 1.0;
+            scaleY = 1.0;
+            PresentationSource source = PresentationSource.FromVisual(visual);
+            if (source != null && source.CompositionTarget != null)
+            {
+                Matrix transform = source.CompositionTarget.TransformToDevice;
+                if (transform.M11 > 0) scaleX = transform.M11;
+                if (transform.M22 > 0) scaleY = transform.M22;
+            }
         }
 
         private void UnbindStaleEndpoint(NativeEndpoint endpoint, string reason)
@@ -474,6 +692,13 @@ namespace NativeEndpointWorkspace
 
         private GeometrySyncResult RepositionCellEndpoint(int cellId)
         {
+            int ignoredError;
+            return RepositionCellEndpoint(cellId, out ignoredError);
+        }
+
+        private GeometrySyncResult RepositionCellEndpoint(int cellId, out int nativeErrorCode)
+        {
+            nativeErrorCode = 0;
             NativeEndpoint endpoint = _registry.GetByCell(cellId);
             CellControl cell;
             if (endpoint == null || !_cells.TryGetValue(cellId, out cell)) return GeometrySyncResult.Failed;
@@ -498,16 +723,19 @@ namespace NativeEndpointWorkspace
                 return GeometrySyncResult.Failed;
 
             _locationCorrectionSuppressedUntil[endpoint.Handle] = DateTime.UtcNow.Add(LocationCorrectionSuppression);
-            GeometrySyncResult result = _windowCoordinator.SyncToRectangle(endpoint, x, y, width, height);
+            GeometrySyncResult result = _windowCoordinator.SyncToRectangle(endpoint, x, y, width, height, out nativeErrorCode);
             if (result == GeometrySyncResult.AlreadyCorrect)
                 correctionState.Reset();
+            else if (result == GeometrySyncResult.Applied)
+                ScheduleEndpointSizeVerification(endpoint);
             return result;
         }
 
-        private void SyncAllEndpointGeometry()
+        private NativeLayoutCommitResult SyncAllEndpointGeometry()
         {
+            var commitResult = new NativeLayoutCommitResult();
             if (!_initialLayoutApplied || _buildingGrid || WindowState == WindowState.Minimized || _syncingEndpoints)
-                return;
+                return commitResult;
 
             var staleEndpoints = new List<NativeEndpoint>();
             _syncingEndpoints = true;
@@ -515,9 +743,32 @@ namespace NativeEndpointWorkspace
             {
                 foreach (NativeEndpoint endpoint in _registry.All().Where(x => x.CellId <= _cellCount).OrderBy(x => x.CellId).ToArray())
                 {
-                    GeometrySyncResult result = RepositionCellEndpoint(endpoint.CellId);
-                    if (result == GeometrySyncResult.StaleEndpoint)
-                        staleEndpoints.Add(endpoint);
+                    int nativeErrorCode;
+                    GeometrySyncResult result = RepositionCellEndpoint(endpoint.CellId, out nativeErrorCode);
+                    switch (result)
+                    {
+                        case GeometrySyncResult.Applied:
+                            commitResult.AppliedGeometryCount++;
+                            break;
+                        case GeometrySyncResult.AlreadyCorrect:
+                            commitResult.AlreadyCorrectCount++;
+                            break;
+                        case GeometrySyncResult.SkippedMinimized:
+                            commitResult.SkippedMinimizedCount++;
+                            break;
+                        case GeometrySyncResult.HungEndpoint:
+                            commitResult.HungEndpointCount++;
+                            break;
+                        case GeometrySyncResult.StaleEndpoint:
+                            commitResult.StaleEndpointCount++;
+                            staleEndpoints.Add(endpoint);
+                            break;
+                        default:
+                            commitResult.GeometryFailureCount++;
+                            commitResult.Failures.Add("Cell " + endpoint.CellId + " geometry failed" +
+                                (nativeErrorCode != 0 ? " (Win32 " + nativeErrorCode + ")" : string.Empty));
+                            break;
+                    }
                 }
             }
             finally
@@ -527,6 +778,7 @@ namespace NativeEndpointWorkspace
 
             foreach (NativeEndpoint stale in staleEndpoints)
                 UnbindStaleEndpoint(stale, "identity validation failed");
+            return commitResult;
         }
 
         private void ScheduleGeometrySync()
@@ -539,7 +791,7 @@ namespace NativeEndpointWorkspace
             QueueNativeLayoutCommit(showCompletionStatus);
         }
 
-        // rc07 preserves rc06's deterministic WPF geometry-fingerprint commit path.
+        // rc08 preserves rc06's deterministic WPF geometry-fingerprint commit path.
         // Endpoint identity validation and bounded correction backoff now guard the native side.
         private void WorkspaceGrid_LayoutUpdated(object sender, EventArgs e)
         {
@@ -624,17 +876,18 @@ namespace NativeEndpointWorkspace
                 // rectangles are read. This is a single commit path for workspace move/resize,
                 // maximize/restore, splitter drag, explicit resync, and layout-lock correction.
                 WorkspaceGrid.UpdateLayout();
-                SyncAllEndpointGeometry();
-                NormalizeEndpointZOrderGroup();
+                NativeLayoutCommitResult result = SyncAllEndpointGeometry();
+                NormalizeEndpointZOrderGroup(result);
                 _lastObservedLayoutFingerprint = CaptureLayoutFingerprint();
+
+                if (showCompletionStatus || result.HasFailures)
+                    StatusText.Text = result.ToStatusText();
             }
             finally
             {
                 _committingNativeLayout = false;
             }
 
-            if (showCompletionStatus)
-                StatusText.Text = "Native layout committed: bound endpoints reapplied to current Cell geometry and Workspace Z-order.";
         }
 
         private bool IsWorkspaceGroupForeground(IntPtr foreground)
@@ -649,6 +902,11 @@ namespace NativeEndpointWorkspace
         }
 
         private void NormalizeEndpointZOrderGroup()
+        {
+            NormalizeEndpointZOrderGroup(null);
+        }
+
+        private void NormalizeEndpointZOrderGroup(NativeLayoutCommitResult commitResult)
         {
             if (!_initialLayoutApplied || _buildingGrid || WindowState == WindowState.Minimized || _normalizingZOrder)
                 return;
@@ -670,24 +928,20 @@ namespace NativeEndpointWorkspace
             _normalizingZOrder = true;
             try
             {
-                // Request a top-to-bottom endpoint group. External raises are asynchronous in
-                // rc07 so a hung target cannot block WPF; bound Cells do not overlap, so
-                // relative endpoint order is best-effort while the group-above-Workspace
-                // invariant remains authoritative.
-                var desiredTopToBottom = new List<NativeEndpoint>();
-                NativeEndpoint activeEndpoint = endpoints.FirstOrDefault(x => x.Handle == foreground);
-                if (activeEndpoint != null)
-                    desiredTopToBottom.Add(activeEndpoint);
-                desiredTopToBottom.AddRange(endpoints.Where(x => activeEndpoint == null || x.Handle != activeEndpoint.Handle));
-
-                for (int i = desiredTopToBottom.Count - 1; i >= 0; i--)
-                    _windowCoordinator.RaiseWithoutActivate(desiredTopToBottom[i]);
-
-                // Preserve the rc06 real-machine invariant: explicitly anchor the opaque WPF
-                // Workspace beneath the endpoint group. Async endpoint raises settle above it
-                // without forcing activation.
-                NativeEndpoint lowestEndpoint = desiredTopToBottom[desiredTopToBottom.Count - 1];
-                _windowCoordinator.PlaceWorkspaceBehindEndpoint(_workspaceHwnd, lowestEndpoint);
+                // rc08 maintains the endpoint group by moving only our own opaque WPF
+                // Workspace behind each valid endpoint. This avoids asynchronous cross-process
+                // endpoint raises racing one another while preserving the user's naturally
+                // activated endpoint at the front of the group.
+                foreach (NativeEndpoint endpoint in endpoints)
+                {
+                    int nativeErrorCode;
+                    if (!_windowCoordinator.PlaceWorkspaceBehindEndpoint(_workspaceHwnd, endpoint, out nativeErrorCode) && commitResult != null)
+                    {
+                        commitResult.ZOrderFailureCount++;
+                        commitResult.Failures.Add("Cell " + endpoint.CellId + " Z-order anchor failed" +
+                            (nativeErrorCode != 0 ? " (Win32 " + nativeErrorCode + ")" : string.Empty));
+                    }
+                }
             }
             finally
             {
@@ -838,17 +1092,29 @@ namespace NativeEndpointWorkspace
 
         private void MinimizeGroup_Click(object sender, RoutedEventArgs e)
         {
+            int requested = 0;
+            int failed = 0;
             foreach (NativeEndpoint endpoint in _registry.All().ToArray())
-                _windowCoordinator.Minimize(endpoint);
-            StatusText.Text = "Minimize requested for all bound endpoints.";
+            {
+                requested++;
+                if (!_windowCoordinator.MinimizeWithoutActivate(endpoint))
+                    failed++;
+            }
+            StatusText.Text = "No-activation minimize requested for " + requested + " endpoint(s); " + failed + " request(s) failed/skipped.";
         }
 
         private void RestoreGroup_Click(object sender, RoutedEventArgs e)
         {
+            int requested = 0;
+            int failed = 0;
             foreach (NativeEndpoint endpoint in _registry.All().ToArray())
-                _windowCoordinator.Restore(endpoint);
+            {
+                requested++;
+                if (!_windowCoordinator.RestoreWithoutActivate(endpoint))
+                    failed++;
+            }
             RequestEndpointResync(true);
-            StatusText.Text = "Restore requested for all bound endpoints.";
+            StatusText.Text = "No-activation restore requested for " + requested + " endpoint(s); " + failed + " request(s) failed/skipped.";
         }
 
         private void ResetTiling_Click(object sender, RoutedEventArgs e)
@@ -860,7 +1126,6 @@ namespace NativeEndpointWorkspace
         private void ResyncEndpoints_Click(object sender, RoutedEventArgs e)
         {
             CommitNativeLayout(true);
-            StatusText.Text = "Native layout commit completed; bindings/apps were not restarted or reloaded.";
         }
 
         private void CellCountComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -992,7 +1257,7 @@ namespace NativeEndpointWorkspace
             {
                 var state = new WorkspaceState
                 {
-                    Version = "0.0.1rc07",
+                    Version = "0.0.1rc08",
                     CellCount = _cellCount,
                     Grid = CaptureGridLayoutState(),
                     Cells = new List<CellLayoutState>(),
@@ -1016,21 +1281,37 @@ namespace NativeEndpointWorkspace
             };
             if (dialog.ShowDialog(this) != true) return;
 
+            int oldCellCount = _cellCount;
+            GridLayoutState oldGrid = CaptureGridLayoutState();
+            IList<ShortcutBinding> oldShortcuts = _shortcutBindings.Select(x => x.Clone()).ToList();
+            NativeEndpoint[] oldEndpoints = _registry.All().ToArray();
+            var oldMinWidths = new Dictionary<int, double>(_cellMinimumHostWidths);
+            var oldMinHeights = new Dictionary<int, double>(_cellMinimumHostHeights);
+
             try
             {
                 WorkspaceState state = _layoutService.Load(dialog.FileName);
+                int proposedCellCount = ResolveLoadedCellCount(state);
+                IList<ShortcutBinding> proposedShortcuts = MergeLoadedShortcutBindings(state == null ? null : state.Shortcuts);
 
-                // Loading a layout releases current bindings but does not close those apps.
+                // Review #6: validate the complete proposed state before mutating the active
+                // Workspace. Malformed geometry/shortcuts cannot destroy the working layout.
+                ValidateLoadedWorkspaceState(state, proposedCellCount, proposedShortcuts);
+
+                foreach (NativeEndpoint endpoint in oldEndpoints)
+                    ClearEndpointRuntimeState(endpoint);
                 _registry.Clear();
                 _locationCorrectionSuppressedUntil.Clear();
                 _pendingLocationCorrections.Clear();
                 _correctionStates.Clear();
                 _minimizedWithWorkspace.Clear();
+                _cellMinimumHostWidths.Clear();
+                _cellMinimumHostHeights.Clear();
                 RefreshManagedHandleSnapshot();
                 foreach (CellControl cell in _cells.Values)
                     cell.SetEndpoint(null);
 
-                _cellCount = ResolveLoadedCellCount(state);
+                _cellCount = proposedCellCount;
                 _updatingCellCountUi = true;
                 try { CellCountComboBox.SelectedItem = _cellCount; }
                 finally { _updatingCellCountUi = false; }
@@ -1038,14 +1319,135 @@ namespace NativeEndpointWorkspace
                 EnsureActiveCellControls();
                 BuildAdaptiveLayout(state == null ? null : state.Grid);
 
-                _shortcutBindings = MergeLoadedShortcutBindings(state == null ? null : state.Shortcuts);
+                _shortcutBindings = proposedShortcuts;
                 string shortcutSummary = ApplyActiveShortcutBindings();
-                StatusText.Text = "Layout loaded with " + _cellCount + " adaptive tiled Cells; endpoint HWNDs intentionally not restored. " + shortcutSummary;
+                StatusText.Text = "Layout loaded transactionally with " + _cellCount +
+                                  " adaptive tiled Cells; endpoint HWNDs intentionally not restored. " + shortcutSummary;
             }
             catch (Exception ex)
             {
+                try
+                {
+                    RestoreWorkspaceAfterFailedLoad(oldCellCount, oldGrid, oldShortcuts, oldEndpoints, oldMinWidths, oldMinHeights);
+                }
+                catch
+                {
+                    // Preserve the original load exception for the user; rollback is best effort.
+                }
                 MessageBox.Show(this, ex.Message, "Load Layout Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void RestoreWorkspaceAfterFailedLoad(int cellCount, GridLayoutState grid, IList<ShortcutBinding> shortcuts,
+            IEnumerable<NativeEndpoint> endpoints, IDictionary<int, double> minWidths, IDictionary<int, double> minHeights)
+        {
+            _registry.Clear();
+            _cellCount = cellCount;
+            _updatingCellCountUi = true;
+            try { CellCountComboBox.SelectedItem = _cellCount; }
+            finally { _updatingCellCountUi = false; }
+
+            _cellMinimumHostWidths.Clear();
+            foreach (KeyValuePair<int, double> pair in minWidths)
+                _cellMinimumHostWidths[pair.Key] = pair.Value;
+            _cellMinimumHostHeights.Clear();
+            foreach (KeyValuePair<int, double> pair in minHeights)
+                _cellMinimumHostHeights[pair.Key] = pair.Value;
+
+            EnsureActiveCellControls();
+            BuildAdaptiveLayout(grid);
+            foreach (CellControl cell in _cells.Values)
+                cell.SetEndpoint(null);
+
+            foreach (NativeEndpoint endpoint in endpoints)
+            {
+                if (endpoint.CellId < 1 || endpoint.CellId > _cellCount)
+                    continue;
+                _registry.Bind(endpoint.CellId, endpoint);
+                CellControl cell;
+                if (_cells.TryGetValue(endpoint.CellId, out cell))
+                    cell.SetEndpoint(endpoint);
+            }
+            RefreshManagedHandleSnapshot();
+
+            _shortcutBindings = shortcuts.Select(x => x.Clone()).ToList();
+            ApplyActiveShortcutBindings();
+            QueueNativeLayoutCommit(false);
+        }
+
+        private static void ValidateLoadedWorkspaceState(WorkspaceState state, int proposedCellCount, IList<ShortcutBinding> proposedShortcuts)
+        {
+            if (state == null)
+                throw new InvalidDataException("Layout file did not contain a WorkspaceState.");
+            if (!string.IsNullOrWhiteSpace(state.Version) && !state.Version.StartsWith("0.0.1", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Layout version is not compatible with the v0.0.1 RC line.");
+            if (state.CellCount != 0 && (state.CellCount < MinCellCount || state.CellCount > MaxCellCount))
+                throw new InvalidDataException("Layout CellCount is outside the supported 4-12 range.");
+            if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < MinCellCount || state.Cells.Count > MaxCellCount))
+                throw new InvalidDataException("Legacy layout does not provide a valid 4-12 Cell count.");
+            if (proposedCellCount < MinCellCount || proposedCellCount > MaxCellCount)
+                throw new InvalidDataException("Resolved layout CellCount is outside the supported 4-12 range.");
+
+            ValidateGridLayoutState(state.Grid, proposedCellCount);
+
+            if (proposedShortcuts == null || proposedShortcuts.Count < proposedCellCount)
+                throw new InvalidDataException("Layout shortcut configuration is incomplete.");
+
+            foreach (ShortcutBinding binding in proposedShortcuts)
+            {
+                if (binding.CellId < 1 || binding.CellId > MaxCellCount)
+                    throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
+                if (binding.KeyCode <= 0 || binding.KeyCode > 0xFF)
+                    throw new InvalidDataException("Layout contains an invalid shortcut virtual-key code.");
+            }
+
+            string duplicate = proposedShortcuts.Where(x => x.CellId <= proposedCellCount)
+                .GroupBy(x => x.ConflictKey)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .FirstOrDefault();
+            if (!string.IsNullOrEmpty(duplicate))
+                throw new InvalidDataException("Layout contains duplicate active shortcut gestures: " + duplicate + ".");
+        }
+
+        private static void ValidateGridLayoutState(GridLayoutState grid, int cellCount)
+        {
+            if (grid == null)
+                return;
+
+            int[] rowCounts = GetRowCellCounts(cellCount);
+            if (grid.RowLayouts != null && grid.RowLayouts.Count > 0)
+            {
+                if (grid.RowLayouts.Count != rowCounts.Length)
+                    throw new InvalidDataException("Layout row count is incompatible with CellCount.");
+
+                int expectedCellId = 1;
+                for (int row = 0; row < rowCounts.Length; row++)
+                {
+                    AdaptiveRowLayoutState rowState = grid.RowLayouts[row];
+                    if (rowState == null || rowState.CellIds == null || rowState.ColumnWeights == null ||
+                        rowState.CellIds.Count != rowCounts[row] || rowState.ColumnWeights.Count != rowCounts[row])
+                        throw new InvalidDataException("Layout row geometry is incomplete or incompatible.");
+                    ValidateFinitePositiveWeight(rowState.HeightWeight, "row height");
+                    for (int column = 0; column < rowCounts[row]; column++)
+                    {
+                        if (rowState.CellIds[column] != expectedCellId++)
+                            throw new InvalidDataException("Layout Cell ordering is invalid.");
+                        ValidateFinitePositiveWeight(rowState.ColumnWeights[column], "column width");
+                    }
+                }
+            }
+
+            if (grid.RowWeights != null)
+                foreach (double weight in grid.RowWeights) ValidateFinitePositiveWeight(weight, "legacy row weight");
+            if (grid.ColumnWeights != null)
+                foreach (double weight in grid.ColumnWeights) ValidateFinitePositiveWeight(weight, "legacy column weight");
+        }
+
+        private static void ValidateFinitePositiveWeight(double value, string name)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0 || value > 1000000)
+                throw new InvalidDataException("Layout contains an invalid " + name + ".");
         }
 
         private static int ResolveLoadedCellCount(WorkspaceState state)
@@ -1068,7 +1470,7 @@ namespace NativeEndpointWorkspace
             var byCell = defaults.ToDictionary(x => x.CellId, x => x);
             if (loaded != null)
             {
-                foreach (ShortcutBinding binding in loaded.Where(x => x.CellId >= 1 && x.CellId <= MaxCellCount))
+                foreach (ShortcutBinding binding in loaded.Where(x => x != null && x.CellId >= 1 && x.CellId <= MaxCellCount))
                     byCell[binding.CellId] = binding.Clone();
             }
             return byCell.Values.OrderBy(x => x.CellId).ToList();
@@ -1140,7 +1542,7 @@ namespace NativeEndpointWorkspace
                     if (!_windowCoordinator.IsMinimized(endpoint))
                     {
                         _minimizedWithWorkspace.Add(endpoint.Handle);
-                        _windowCoordinator.Minimize(endpoint);
+                        _windowCoordinator.MinimizeWithoutActivate(endpoint);
                     }
                 }
                 return;
@@ -1150,10 +1552,17 @@ namespace NativeEndpointWorkspace
             {
                 NativeEndpoint endpoint = _registry.GetByHandle(hwnd);
                 if (endpoint != null)
-                    _windowCoordinator.Restore(endpoint);
+                    _windowCoordinator.RestoreWithoutActivate(endpoint);
             }
             _minimizedWithWorkspace.Clear();
             RequestEndpointResync(true);
+        }
+
+        private void StopAllSizeVerificationTimers()
+        {
+            foreach (DispatcherTimer timer in _sizeVerificationTimers.Values.ToArray())
+                timer.Stop();
+            _sizeVerificationTimers.Clear();
         }
 
         private void MainWindow_Closing(object sender, CancelEventArgs e)
@@ -1194,6 +1603,7 @@ namespace NativeEndpointWorkspace
 
             _workspaceCloseAccepted = true;
             _windowHealthTimer.Stop();
+            StopAllSizeVerificationTimers();
             _layoutLockService.Dispose();
 
             foreach (NativeEndpoint endpoint in closableEndpoints)
@@ -1206,6 +1616,7 @@ namespace NativeEndpointWorkspace
         private void MainWindow_Closed(object sender, EventArgs e)
         {
             _windowHealthTimer.Stop();
+            StopAllSizeVerificationTimers();
             WorkspaceGrid.LayoutUpdated -= WorkspaceGrid_LayoutUpdated;
             _layoutLockService.WindowLocationChanged -= LayoutLockService_WindowLocationChanged;
             _layoutLockService.ForegroundChanged -= LayoutLockService_ForegroundChanged;

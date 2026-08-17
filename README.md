@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Version:** v0.0.1rc07  
+**Version:** v0.0.1rc08  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2
 
 Native Endpoint Workspace is a Windows technical POC for arranging and managing independent native top-level application windows as adaptive tiled **Native Endpoints** without embedding or reparenting them.
@@ -23,50 +23,31 @@ The implementation deliberately does **not** use:
 - `WriteProcessMemory`
 - `TerminateProcess`
 
-## rc07 focus — Endpoint Identity & Native Operation Hardening
+## rc08 focus — Foreground Group, Size Accommodation, and Review Medium Findings
 
-rc06 established the first real-machine baseline where multiple Firefox windows could remain locked to tiled Cells while the Workspace was moved, resized, maximized, restored, or splitters were dragged.
+rc08 preserves the rc06/rc07 real-machine tiled-window baseline and closes the next reliability tranche without adding unrelated features.
 
-rc07 keeps that layout model and hardens the native-window boundary after static review identified stale/reused HWND handling, potentially blocking cross-process calls, and unbounded correction loops as the main reliability risks.
+### Managed Endpoint Foreground Group
 
-### Stronger runtime endpoint identity
+When any bound endpoint becomes foreground, the Workspace now re-establishes the **whole bound endpoint group above the opaque WPF Workspace** by moving only the Workspace behind each healthy endpoint. It no longer relies on a race between multiple asynchronous endpoint-raise requests. The user's clicked endpoint remains naturally active; the Workspace does not call `SetForegroundWindow`, `SetFocus`, or synthesize input.
 
-A bound endpoint now records:
+### Endpoint Size Accommodation
 
-```text
-HWND
-Process ID (PID)
-Thread ID (TID)
-Process start time (when accessible)
-Window class name
-Process name / title (display metadata)
-```
+Some applications, such as Windows Calculator modes, enforce a minimum top-level window size. After an asynchronous geometry request, rc08 verifies the settled window rectangle. If the endpoint accepted the Cell position but rejected the requested width/height, the Workspace treats the observed larger size as a minimum-size constraint instead of fighting it indefinitely.
 
-Routine native operations validate the current HWND against PID/TID/window class. Destructive `WM_CLOSE` requests perform an additional process-start-time check when that information was captured at bind time.
+The affected Cell/row receives a larger minimum allocation; neighboring Cells give up space first, and a normal-state Workspace may grow up to the current monitor work area when the existing canvas cannot satisfy the learned minimums. Unbinding the endpoint releases its learned Cell minimum.
 
-`EVENT_OBJECT_DESTROY` is monitored so a destroyed managed window can be unbound immediately rather than leaving a stale HWND in the registry.
+### Review #5 — explicit no-activation group minimize/restore
 
-> HWND is still a Windows runtime resource, not a permanent object identifier. rc07 substantially reduces handle-reuse risk but does not claim that an HWND can be made globally permanent.
+Group lifecycle commands now use `ShowWindowAsync` with no-activation show states (`SW_SHOWMINNOACTIVE` / `SW_SHOWNOACTIVATE`). Geometry and Z-order maintenance continue to use no-activation policies. Natural user clicks are the activation mechanism.
 
-### Guarded / non-blocking cross-process window operations
+### Review #6 — transactional layout loading
 
-External geometry and endpoint-raise operations use `SWP_ASYNCWINDOWPOS`; group minimize/restore uses `ShowWindowAsync`; close requests use `PostMessage(WM_CLOSE)`.
+Layout files are deserialized and fully validated before active Workspace state is mutated. rc08 validates Cell range, adaptive row structure, finite positive layout weights, shortcut ranges, and duplicate active gestures. If commit of a validated layout throws, the previous Cell count, tiling, shortcuts, runtime bindings, and learned size constraints are restored on a best-effort rollback path.
 
-Before native operations, endpoint identity is revalidated. Hung endpoints are skipped for geometry/Z-order correction so an unresponsive external UI thread is not allowed to hold the WPF Dispatcher in a synchronous geometry/raise call.
+### Review #7 — native-operation result reporting
 
-The Workspace itself is still placed below the endpoint group with a normal same-process `SetWindowPos` operation. Endpoint windows remain normal, non-topmost top-level windows.
-
-### Bounded Layout Lock correction
-
-If an application repeatedly rejects the requested Cell geometry, rc07 no longer corrects indefinitely at full rate.
-
-Per-endpoint state tracks correction bursts. After four correction attempts inside a short burst window, Layout Lock pauses corrections for three seconds and surfaces a status warning. This bounds the `SetWindowPos -> WinEvent -> correction` feedback path while keeping normal snap-back behavior.
-
-### Early WinEvent filtering
-
-The WinEvent service keeps a thread-safe snapshot of currently managed HWNDs. Unrelated system-wide location/destroy events are discarded in the callback before any WPF Dispatcher work is queued.
-
-Foreground events are likewise passed through only for the Workspace or a currently managed endpoint.
+Native layout commits now aggregate geometry outcomes, stale/hung/minimized skips, Win32 geometry failures, and Workspace Z-order anchor failures. Explicit Resync and failed background commits surface structured status instead of always claiming success.
 
 ## Adaptive tiled layout
 
@@ -122,10 +103,10 @@ validate endpoint runtime identity
 apply Cell screen rectangles asynchronously
         |
         v
-raise healthy endpoint group without activation
+verify endpoint minimum-size acceptance
         |
         v
-anchor Workspace beneath endpoint group
+anchor Workspace beneath every healthy endpoint
 ```
 
 `Resync Endpoints` invokes the same path manually. It does not rebind, restart, or reload applications.
@@ -143,7 +124,7 @@ If an endpoint repeatedly refuses the requested geometry, bounded retry/backoff 
 - **Unbind:** stop managing the endpoint; application remains open.
 - **Cell Close:** unbind and send graceful `WM_CLOSE` only after critical endpoint identity revalidation.
 - **Reduce Cell count:** endpoints in removed Cells are unbound only; applications remain open.
-- **Load Layout:** current runtime bindings are released; applications remain open.
+- **Load Layout:** proposed state is validated before mutation; a successful load releases current runtime bindings while applications remain open; failed commit attempts roll back the previous working state.
 - **Close Workspace:** after confirmation, still-bound endpoints that pass critical identity revalidation receive graceful `WM_CLOSE`; stale/unverifiable endpoints are deliberately left open.
 
 `WM_CLOSE` is preferred over process termination so applications retain their normal unsaved-data handling.
@@ -182,10 +163,11 @@ WPF Workspace
     |
     +-- NativeWindowCoordinator
             +-- identity validation
-            +-- async external geometry/Z-order requests
-            +-- async minimize/restore
+            +-- async external geometry requests
+            +-- no-activation group minimize/restore
             +-- critical WM_CLOSE revalidation
-            +-- Workspace-below-endpoint-group anchoring
+            +-- Workspace-below-all-endpoints Z-order anchoring
+            +-- monitor work-area query for size accommodation
 ```
 
 ## Build
@@ -205,22 +187,22 @@ run.cmd
 
 The POC starts on .NET Framework 4.7.2 for compatibility with the initial test machine. Native/Services boundaries remain separated so a later migration to modern .NET/WPF does not require changing the Native Endpoint concept.
 
-## rc07 regression / hardening test
+## rc08 regression / hardening test
 
-1. Bind at least three separate Firefox top-level windows plus one non-Firefox application.
-2. Repeat Workspace move, continuous resize, maximize/restore, and Cell splitter drag. rc06 behavior must remain intact.
-3. Click among bound endpoints; other bound Cells must remain visible.
-4. Drag/resize a bound endpoint directly; normal snap-back should occur.
-5. Repeatedly force one application to reject/move away from requested geometry and verify correction eventually enters temporary backoff instead of looping continuously.
-6. Close one bound application externally. Its Cell should automatically unbind from the destroy event (with health-timer fallback still available).
-7. Minimize/restore the group and verify the Workspace remains responsive if one endpoint is slow or hung.
-8. Close a bound Cell and verify graceful close occurs only for a revalidated endpoint.
-9. Close the Workspace and verify revalidated bound applications receive graceful close requests; stale/unverifiable endpoints must be left open.
-10. Confirm `Resync Endpoints` preserves bindings and never restarts an application.
+1. Bind four separate Firefox top-level windows plus Notepad++, Command Prompt/Terminal, and Windows Calculator.
+2. Click repeatedly among Firefox, console, editor, and Calculator. No other bound endpoint should disappear behind the Workspace.
+3. Move/resize/maximize/restore the Workspace and drag Cell splitters; all bound endpoints must follow the current Cell geometry.
+4. Bind an application that rejects a Cell size. Verify the Cell/row allocation expands and, when necessary in normal state, the Workspace grows within the monitor work area instead of entering an endless correction fight.
+5. Unbind that endpoint and verify its learned size constraint is released.
+6. Minimize/Restore Group and verify endpoints do not steal activation sequentially.
+7. Load a malformed/incompatible layout and verify the previously working layout/bindings remain intact.
+8. Use `Resync Endpoints` and verify the status reports geometry/Z-order failures or stale/hung skips rather than unconditional success.
+9. Re-run rc07 identity/destroy/backoff tests and rc06 resize/maximize regression tests.
+10. Close the Workspace and verify only still-bound, strongly revalidated endpoints receive graceful `WM_CLOSE`.
 
 ## Current maturity
 
-**POC / hardening stage.** rc07 addresses the highest-priority static-review findings around endpoint identity, cross-process UI blocking risk, destroy detection, early event filtering, and correction-loop bounding. Transactional layout loading, richer native-operation result reporting, and explicit restore/focus policy remain future hardening work.
+**POC / hardening stage.** rc08 preserves the working Native Endpoint layout model while addressing foreground-group Z-order, endpoint minimum-size accommodation, explicit no-activation group restore/minimize policy, transactional layout loading, and structured native layout result reporting. Remaining static-review cleanup items are intentionally deferred to the next RC rather than mixed into this reliability tranche.
 
 ## License
 

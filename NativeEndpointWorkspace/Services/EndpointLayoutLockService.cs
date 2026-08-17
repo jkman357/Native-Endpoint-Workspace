@@ -5,7 +5,7 @@ using NativeEndpointWorkspace.Native;
 
 namespace NativeEndpointWorkspace.Services
 {
-    // Observes external top-level windows without injection. rc07 filters managed HWNDs
+    // Observes external top-level windows without injection. rc08 filters managed HWNDs
     // inside the WinEvent callback before WPF Dispatcher work is created.
     public sealed class EndpointLayoutLockService : IDisposable
     {

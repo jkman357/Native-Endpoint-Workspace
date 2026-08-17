@@ -125,6 +125,13 @@ namespace NativeEndpointWorkspace.Native
 
         public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height)
         {
+            int ignoredError;
+            return SyncToRectangle(endpoint, x, y, width, height, out ignoredError);
+        }
+
+        public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height, out int nativeErrorCode)
+        {
+            nativeErrorCode = 0;
             if (!IsEndpointIdentityCurrent(endpoint, false))
                 return GeometrySyncResult.StaleEndpoint;
 
@@ -151,6 +158,8 @@ namespace NativeEndpointWorkspace.Native
                 NativeMethods.SWP_NOZORDER |
                 NativeMethods.SWP_ASYNCWINDOWPOS);
 
+            if (!ok)
+                nativeErrorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
             return ok ? GeometrySyncResult.Applied : GeometrySyncResult.Failed;
         }
 
@@ -183,10 +192,17 @@ namespace NativeEndpointWorkspace.Native
 
         public bool PlaceWorkspaceBehindEndpoint(IntPtr workspaceHwnd, NativeEndpoint endpointAbove)
         {
+            int ignoredError;
+            return PlaceWorkspaceBehindEndpoint(workspaceHwnd, endpointAbove, out ignoredError);
+        }
+
+        public bool PlaceWorkspaceBehindEndpoint(IntPtr workspaceHwnd, NativeEndpoint endpointAbove, out int nativeErrorCode)
+        {
+            nativeErrorCode = 0;
             if (!IsValidWindow(workspaceHwnd) || !IsEndpointIdentityCurrent(endpointAbove, false) || workspaceHwnd == endpointAbove.Handle)
                 return false;
 
-            return NativeMethods.SetWindowPos(
+            bool ok = NativeMethods.SetWindowPos(
                 workspaceHwnd,
                 endpointAbove.Handle,
                 0,
@@ -194,20 +210,64 @@ namespace NativeEndpointWorkspace.Native
                 0,
                 0,
                 NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+            if (!ok)
+                nativeErrorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            return ok;
         }
 
-        public bool Minimize(NativeEndpoint endpoint)
+        // Group operations deliberately avoid activation. User clicks are the only path that
+        // should naturally activate an endpoint.
+        public bool MinimizeWithoutActivate(NativeEndpoint endpoint)
         {
             if (!IsEndpointIdentityCurrent(endpoint, false))
                 return false;
-            return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_MINIMIZE);
+            return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_SHOWMINNOACTIVE);
         }
 
-        public bool Restore(NativeEndpoint endpoint)
+        public bool RestoreWithoutActivate(NativeEndpoint endpoint)
         {
             if (!IsEndpointIdentityCurrent(endpoint, false))
                 return false;
-            return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_RESTORE);
+            return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_SHOWNOACTIVATE);
+        }
+
+        public bool TryGetWindowRectangle(NativeEndpoint endpoint, out int x, out int y, out int width, out int height)
+        {
+            x = y = width = height = 0;
+            if (!IsEndpointIdentityCurrent(endpoint, false))
+                return false;
+
+            NativeMethods.RECT rect;
+            if (!NativeMethods.GetWindowRect(endpoint.Handle, out rect))
+                return false;
+
+            x = rect.Left;
+            y = rect.Top;
+            width = Math.Max(1, rect.Right - rect.Left);
+            height = Math.Max(1, rect.Bottom - rect.Top);
+            return true;
+        }
+
+        public bool TryGetMonitorWorkArea(IntPtr hwnd, out int left, out int top, out int right, out int bottom)
+        {
+            left = top = right = bottom = 0;
+            if (!IsValidWindow(hwnd))
+                return false;
+
+            IntPtr monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero)
+                return false;
+
+            var info = new NativeMethods.MONITORINFO();
+            info.cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.MONITORINFO));
+            if (!NativeMethods.GetMonitorInfo(monitor, ref info))
+                return false;
+
+            left = info.rcWork.Left;
+            top = info.rcWork.Top;
+            right = info.rcWork.Right;
+            bottom = info.rcWork.Bottom;
+            return true;
         }
 
         public bool RequestClose(NativeEndpoint endpoint)
