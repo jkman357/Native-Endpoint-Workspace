@@ -10,7 +10,6 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="34"/>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="12"/>
             </Grid.RowDefinitions>
 
             <Grid x:Name="Header" Grid.Row="0" Background="#2D3440">
@@ -32,9 +31,6 @@
                            Text="No endpoint bound"/>
             </Border>
 
-            <Grid Grid.Row="2" Background="#2D3440">
-                <TextBlock Text="layout locked • drag splitters between Cells" Foreground="#7F8998" FontSize="9" Margin="5,0" VerticalAlignment="Center"/>
-            </Grid>
         </Grid>
     </Border>
 </UserControl>

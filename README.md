@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc14  
+**Current version:** v0.0.1rc15  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Technical POC / hardening line
 
@@ -28,6 +28,7 @@ WPF Workspace
     |       +-- ~45 ms interactive coalescing
     |       +-- final precise commit after resize/splitter operations
     |       +-- requested vs verified geometry state
+    |       +-- verified top-level client repaint hint after async resize settles
     |
     +-- Endpoint Layout Lock
     |       +-- out-of-context WinEvent observation
@@ -95,6 +96,8 @@ Runtime HWND/PID/TID data is never persisted to layout files.
 ## Adaptive layout
 
 - 4 through 12 Cells; default 8.
+- Cell headers use compact `F1` through `F12` badges instead of redundant `Cell 1` / `Cell 2` labels.
+- The fixed per-Cell `layout locked` footer is removed; status output is reserved for useful runtime events/results.
 - Workspace owns a fixed total layout area.
 - Splitters redistribute area instead of allowing Cells to float outside the Workspace.
 - Each row can have independent horizontal proportions.

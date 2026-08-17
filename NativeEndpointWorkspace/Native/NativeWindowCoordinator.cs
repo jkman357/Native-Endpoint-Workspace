@@ -41,6 +41,19 @@ namespace NativeEndpointWorkspace.Native
             return IsEndpointIdentityCurrent(endpoint, false) && NativeMethods.IsWindowVisible(endpoint.Handle);
         }
 
+        public bool RequestClientRepaint(NativeEndpoint endpoint)
+        {
+            if (!IsEndpointIdentityCurrent(endpoint, false) ||
+                NativeMethods.IsIconic(endpoint.Handle) ||
+                NativeMethods.IsHungAppWindow(endpoint.Handle) ||
+                !NativeMethods.IsWindowVisible(endpoint.Handle))
+                return false;
+
+            // Non-blocking repaint hint for the endpoint's own top-level client area.
+            // Do not enumerate or manipulate application-specific child HWNDs.
+            return NativeMethods.InvalidateRect(endpoint.Handle, IntPtr.Zero, false);
+        }
+
         public NativeEndpoint DescribeWindow(int cellId, IntPtr hwnd)
         {
             var title = new StringBuilder(WorkspaceConstants.WindowTextCapacity);

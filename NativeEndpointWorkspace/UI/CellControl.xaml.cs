@@ -20,8 +20,8 @@ namespace NativeEndpointWorkspace.UI
         {
             InitializeComponent();
             CellId = cellId;
-            CellNumberText.Text = "Cell " + cellId;
-            EndpointText.Text = "Ctrl+Shift+F" + cellId;
+            CellNumberText.Text = "F" + cellId;
+            EndpointText.Text = "No endpoint";
         }
 
         public void SetEndpoint(NativeEndpoint endpoint)

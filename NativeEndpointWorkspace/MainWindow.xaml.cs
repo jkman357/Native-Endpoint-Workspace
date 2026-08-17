@@ -504,6 +504,12 @@ namespace NativeEndpointWorkspace
             {
                 _lastVerifiedCellRects[endpoint.CellId] = desired;
                 GetCorrectionState(endpoint.Handle).Reset();
+
+                // The outer native frame can settle before a compositor-backed client area
+                // repaints. After verified geometry convergence, issue one non-blocking
+                // top-level client invalidation hint. This intentionally avoids child HWNDs.
+                if (_windowCoordinator.RequestClientRepaint(current))
+                    _runtimeLog.Debug("ENDPOINT_REPAINT_HINT", RuntimeLogService.EndpointMetadata(current));
                 return;
             }
             if (!positionAccepted || (!widthRejected && !heightRejected))

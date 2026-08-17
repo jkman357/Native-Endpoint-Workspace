@@ -103,7 +103,7 @@ namespace NativeEndpointWorkspace.Tests
         {
             var state = new WorkspaceState
             {
-                Version = "0.0.1rc14",
+                Version = "0.0.1rc15",
                 LayoutSchemaVersion = 99,
                 CellCount = 4
             };

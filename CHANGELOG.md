@@ -2,6 +2,16 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
 
+## v0.0.1rc15 — Endpoint Repaint Stabilization + Cell Header Cleanup
+
+- removed the fixed per-Cell `layout locked • drag splitters between Cells` footer to reclaim content space
+- replaced redundant `Cell 1` / `Cell 2` header badges with compact `F1` through `F12` badges
+- simplified unbound Cell headers to show `No endpoint` while retaining `#` Identify and global F-key assignment mapping
+- added a bounded top-level client repaint hint after asynchronous endpoint geometry has been observed and verified at the desired rectangle
+- kept repaint handling non-blocking and limited to the bound top-level HWND; no application-specific child HWND enumeration, focus manipulation, or input injection was added
+- retained rc14 compile fixes, rc13 build/test diagnostics, and rc12 safety/schema/runtime-log hardening
+- advanced application/runtime/source baseline to v0.0.1rc15
+
 ## v0.0.1rc14 — Compile-Fix Closure
 
 - fixed `CS0165` in `ShortcutService` by giving rollback diagnostics a definite initial value before the short-circuit rollback path
