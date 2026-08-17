@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc13  
+**Current version:** v0.0.1rc14  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Technical POC / hardening line
 

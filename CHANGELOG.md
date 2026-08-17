@@ -2,6 +2,13 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
 
+## v0.0.1rc14 — Compile-Fix Closure
+
+- fixed `CS0165` in `ShortcutService` by giving rollback diagnostics a definite initial value before the short-circuit rollback path
+- fixed `CS0136` in `EndpointLayoutLockService` by using distinct managed-window variable names for foreground and object WinEvent branches
+- preserved the rc13 build/test diagnostics and the rc12 endpoint-management behavior without intentional runtime policy changes
+- advanced application/runtime/source baseline to v0.0.1rc14
+
 ## v0.0.1rc13 — Build & Test Diagnostics Hardening
 
 - added automatic detailed MSBuild logging to `logs\build.log` for every `build.cmd` invocation

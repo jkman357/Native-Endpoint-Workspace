@@ -95,14 +95,14 @@ namespace NativeEndpointWorkspace.Services
 
             if (eventType == NativeMethods.EVENT_SYSTEM_FOREGROUND)
             {
-                bool isManaged;
+                bool isManagedForeground;
                 bool isWorkspace;
                 lock (_managedHandleLock)
                 {
-                    isManaged = _managedHandles.Contains(hwnd);
+                    isManagedForeground = _managedHandles.Contains(hwnd);
                     isWorkspace = hwnd == _workspaceHwnd;
                 }
-                if (!isWorkspace && !isManaged)
+                if (!isWorkspace && !isManagedForeground)
                     return;
 
                 Action<IntPtr> foregroundHandler = ForegroundChanged;
@@ -116,10 +116,10 @@ namespace NativeEndpointWorkspace.Services
             if (idObject != NativeMethods.OBJID_WINDOW || idChild != NativeMethods.CHILDID_SELF)
                 return;
 
-            bool isManaged;
+            bool isManagedObject;
             lock (_managedHandleLock)
-                isManaged = _managedHandles.Contains(hwnd);
-            if (!isManaged)
+                isManagedObject = _managedHandles.Contains(hwnd);
+            if (!isManagedObject)
                 return;
 
             if (eventType == NativeMethods.EVENT_OBJECT_DESTROY)
