@@ -19,17 +19,6 @@ namespace NativeEndpointWorkspace
 {
     public partial class MainWindow : Window
     {
-        private const int MinCellCount = 4;
-        private const int MaxCellCount = 12;
-        private const int DefaultCellCount = 8;
-        private const double SplitterSize = 6.0;
-        private const double DefaultCellMinWidth = 155.0;
-        private const double DefaultRowMinHeight = 115.0;
-        private const double SizeVerificationPositionTolerance = 20.0;
-        private const double SizeVerificationGrowthTolerance = 8.0;
-        private static readonly TimeSpan LocationCorrectionSuppression = TimeSpan.FromMilliseconds(180);
-        private static readonly TimeSpan EndpointHealthInterval = TimeSpan.FromMilliseconds(1250);
-        private static readonly TimeSpan EndpointSizeVerificationDelay = TimeSpan.FromMilliseconds(220);
 
         private readonly NativeWindowCoordinator _windowCoordinator = new NativeWindowCoordinator();
         private readonly EndpointRegistry _registry = new EndpointRegistry();
@@ -64,14 +53,15 @@ namespace NativeEndpointWorkspace
         private bool _committingNativeLayout;
         private string _lastObservedLayoutFingerprint = string.Empty;
         private bool _workspaceCloseAccepted;
-        private int _cellCount = DefaultCellCount;
+        private int _cellCount = WorkspaceConstants.DefaultCellCount;
         private int _rowCount;
 
         public MainWindow()
         {
             InitializeComponent();
+            Title = "Native Endpoint Workspace v" + WorkspaceConstants.Version;
 
-            for (int i = MinCellCount; i <= MaxCellCount; i++)
+            for (int i = WorkspaceConstants.MinimumCellCount; i <= WorkspaceConstants.MaximumCellCount; i++)
                 CellCountComboBox.Items.Add(i);
             CellCountComboBox.SelectedItem = _cellCount;
 
@@ -88,9 +78,9 @@ namespace NativeEndpointWorkspace
             _layoutLockService.ForegroundChanged += LayoutLockService_ForegroundChanged;
             _layoutLockService.WindowDestroyed += LayoutLockService_WindowDestroyed;
 
-            // Slow health fallback only. rc08 keeps rc06's deterministic LayoutUpdated
+            // Slow health fallback only. rc09 keeps rc06's deterministic LayoutUpdated
             // commit path and adds identity/backoff hardening around native endpoints.
-            _windowHealthTimer = new DispatcherTimer { Interval = EndpointHealthInterval };
+            _windowHealthTimer = new DispatcherTimer { Interval = WorkspaceConstants.EndpointHealthInterval };
             _windowHealthTimer.Tick += WindowHealthTimer_Tick;
             WorkspaceGrid.LayoutUpdated += WorkspaceGrid_LayoutUpdated;
         }
@@ -162,7 +152,11 @@ namespace NativeEndpointWorkspace
                 case 9: return new[] { 3, 3, 3 };
                 case 10: return new[] { 4, 3, 3 };
                 case 11: return new[] { 4, 4, 3 };
-                default: return new[] { 4, 4, 4 };
+                case 12: return new[] { 4, 4, 4 };
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(cellCount), cellCount,
+                        "Cell count must be between " + WorkspaceConstants.MinimumCellCount +
+                        " and " + WorkspaceConstants.MaximumCellCount + ".");
             }
         }
 
@@ -200,7 +194,7 @@ namespace NativeEndpointWorkspace
                     WorkspaceGrid.RowDefinitions.Add(new RowDefinition
                     {
                         Height = new GridLength(rowWeight, GridUnitType.Star),
-                        MinHeight = DefaultRowMinHeight
+                        MinHeight = WorkspaceConstants.DefaultRowMinimumHeight
                     });
 
                     var rowGrid = new Grid
@@ -225,7 +219,7 @@ namespace NativeEndpointWorkspace
                         var cellColumn = new ColumnDefinition
                         {
                             Width = new GridLength(columnWeight, GridUnitType.Star),
-                            MinWidth = DefaultCellMinWidth
+                            MinWidth = WorkspaceConstants.DefaultCellMinimumWidth
                         };
                         rowGrid.ColumnDefinitions.Add(cellColumn);
 
@@ -241,7 +235,7 @@ namespace NativeEndpointWorkspace
 
                         if (column < cellsInRow - 1)
                         {
-                            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SplitterSize) });
+                            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(WorkspaceConstants.SplitterSize) });
                             GridSplitter splitter = CreateVerticalSplitter();
                             Grid.SetColumn(splitter, column * 2 + 1);
                             Grid.SetRow(splitter, 0);
@@ -256,7 +250,7 @@ namespace NativeEndpointWorkspace
 
                     if (logicalRow < _rowCount - 1)
                     {
-                        WorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(SplitterSize) });
+                        WorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(WorkspaceConstants.SplitterSize) });
                         GridSplitter horizontalSplitter = CreateHorizontalSplitter();
                         Grid.SetRow(horizontalSplitter, logicalRow * 2 + 1);
                         Grid.SetColumn(horizontalSplitter, 0);
@@ -303,7 +297,7 @@ namespace NativeEndpointWorkspace
         {
             var splitter = new GridSplitter
             {
-                Width = SplitterSize,
+                Width = WorkspaceConstants.SplitterSize,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
                 Background = new SolidColorBrush(Color.FromRgb(58, 67, 81)),
@@ -320,7 +314,7 @@ namespace NativeEndpointWorkspace
         {
             var splitter = new GridSplitter
             {
-                Height = SplitterSize,
+                Height = WorkspaceConstants.SplitterSize,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
                 Background = new SolidColorBrush(Color.FromRgb(58, 67, 81)),
@@ -481,7 +475,7 @@ namespace NativeEndpointWorkspace
 
             var timer = new DispatcherTimer(DispatcherPriority.Background)
             {
-                Interval = EndpointSizeVerificationDelay
+                Interval = WorkspaceConstants.EndpointSizeVerificationDelay
             };
             timer.Tick += delegate
             {
@@ -510,10 +504,10 @@ namespace NativeEndpointWorkspace
             if (!_windowCoordinator.TryGetWindowRectangle(current, out actualX, out actualY, out actualWidth, out actualHeight))
                 return;
 
-            bool positionAccepted = Math.Abs(actualX - desired.Left) <= SizeVerificationPositionTolerance &&
-                                    Math.Abs(actualY - desired.Top) <= SizeVerificationPositionTolerance;
-            bool widthRejected = actualWidth > desired.Width + SizeVerificationGrowthTolerance;
-            bool heightRejected = actualHeight > desired.Height + SizeVerificationGrowthTolerance;
+            bool positionAccepted = Math.Abs(actualX - desired.Left) <= WorkspaceConstants.SizeVerificationPositionTolerance &&
+                                    Math.Abs(actualY - desired.Top) <= WorkspaceConstants.SizeVerificationPositionTolerance;
+            bool widthRejected = actualWidth > desired.Width + WorkspaceConstants.SizeVerificationGrowthTolerance;
+            bool heightRejected = actualHeight > desired.Height + WorkspaceConstants.SizeVerificationGrowthTolerance;
             if (!positionAccepted || (!widthRejected && !heightRejected))
                 return;
 
@@ -581,8 +575,8 @@ namespace NativeEndpointWorkspace
             {
                 double required;
                 pair.Value.MinWidth = _cellMinimumHostWidths.TryGetValue(pair.Key, out required)
-                    ? Math.Max(DefaultCellMinWidth, required)
-                    : DefaultCellMinWidth;
+                    ? Math.Max(WorkspaceConstants.DefaultCellMinimumWidth, required)
+                    : WorkspaceConstants.DefaultCellMinimumWidth;
             }
 
             for (int logicalRow = 0; logicalRow < _rowCount; logicalRow++)
@@ -591,7 +585,7 @@ namespace NativeEndpointWorkspace
                 if (rowDefinitionIndex >= WorkspaceGrid.RowDefinitions.Count)
                     continue;
 
-                double requiredRowHeight = DefaultRowMinHeight;
+                double requiredRowHeight = WorkspaceConstants.DefaultRowMinimumHeight;
                 List<int> cellIds;
                 if (_rowCellIds.TryGetValue(logicalRow, out cellIds))
                 {
@@ -722,7 +716,7 @@ namespace NativeEndpointWorkspace
             if (correctionState.IsBackedOff(DateTime.UtcNow))
                 return GeometrySyncResult.Failed;
 
-            _locationCorrectionSuppressedUntil[endpoint.Handle] = DateTime.UtcNow.Add(LocationCorrectionSuppression);
+            _locationCorrectionSuppressedUntil[endpoint.Handle] = DateTime.UtcNow.Add(WorkspaceConstants.LocationCorrectionSuppression);
             GeometrySyncResult result = _windowCoordinator.SyncToRectangle(endpoint, x, y, width, height, out nativeErrorCode);
             if (result == GeometrySyncResult.AlreadyCorrect)
                 correctionState.Reset();
@@ -791,7 +785,7 @@ namespace NativeEndpointWorkspace
             QueueNativeLayoutCommit(showCompletionStatus);
         }
 
-        // rc08 preserves rc06's deterministic WPF geometry-fingerprint commit path.
+        // rc09 preserves rc06's deterministic WPF geometry-fingerprint commit path.
         // Endpoint identity validation and bounded correction backoff now guard the native side.
         private void WorkspaceGrid_LayoutUpdated(object sender, EventArgs e)
         {
@@ -845,12 +839,14 @@ namespace NativeEndpointWorkspace
             return string.Join("|", parts);
         }
 
-        private void QueueNativeLayoutCommit(bool showCompletionStatus)
+        // Review #8: completion-status intent is UI-only and is explicitly coalesced
+        // across queued commits. It does not imply different layout correctness semantics.
+        private void QueueNativeLayoutCommit(bool requestCompletionStatus)
         {
             if (!_initialLayoutApplied || !IsLoaded || _buildingGrid || _workspaceCloseAccepted || WindowState == WindowState.Minimized)
                 return;
 
-            _queuedShowCompletionStatus |= showCompletionStatus;
+            _queuedShowCompletionStatus |= requestCompletionStatus;
             if (_nativeLayoutCommitQueued)
                 return;
 
@@ -928,7 +924,7 @@ namespace NativeEndpointWorkspace
             _normalizingZOrder = true;
             try
             {
-                // rc08 maintains the endpoint group by moving only our own opaque WPF
+                // rc09 maintains the endpoint group by moving only our own opaque WPF
                 // Workspace behind each valid endpoint. This avoids asynchronous cross-process
                 // endpoint raises racing one another while preserving the user's naturally
                 // activated endpoint at the front of the group.
@@ -1153,7 +1149,7 @@ namespace NativeEndpointWorkspace
 
         private bool TryChangeCellCount(int requested)
         {
-            requested = Math.Max(MinCellCount, Math.Min(MaxCellCount, requested));
+            requested = Math.Max(WorkspaceConstants.MinimumCellCount, Math.Min(WorkspaceConstants.MaximumCellCount, requested));
             if (requested == _cellCount)
                 return true;
 
@@ -1257,7 +1253,7 @@ namespace NativeEndpointWorkspace
             {
                 var state = new WorkspaceState
                 {
-                    Version = "0.0.1rc08",
+                    Version = WorkspaceConstants.Version,
                     CellCount = _cellCount,
                     Grid = CaptureGridLayoutState(),
                     Cells = new List<CellLayoutState>(),
@@ -1379,13 +1375,13 @@ namespace NativeEndpointWorkspace
         {
             if (state == null)
                 throw new InvalidDataException("Layout file did not contain a WorkspaceState.");
-            if (!string.IsNullOrWhiteSpace(state.Version) && !state.Version.StartsWith("0.0.1", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(state.Version) && !state.Version.StartsWith(WorkspaceConstants.LayoutVersionCompatibilityPrefix, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Layout version is not compatible with the v0.0.1 RC line.");
-            if (state.CellCount != 0 && (state.CellCount < MinCellCount || state.CellCount > MaxCellCount))
+            if (state.CellCount != 0 && (state.CellCount < WorkspaceConstants.MinimumCellCount || state.CellCount > WorkspaceConstants.MaximumCellCount))
                 throw new InvalidDataException("Layout CellCount is outside the supported 4-12 range.");
-            if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < MinCellCount || state.Cells.Count > MaxCellCount))
+            if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < WorkspaceConstants.MinimumCellCount || state.Cells.Count > WorkspaceConstants.MaximumCellCount))
                 throw new InvalidDataException("Legacy layout does not provide a valid 4-12 Cell count.");
-            if (proposedCellCount < MinCellCount || proposedCellCount > MaxCellCount)
+            if (proposedCellCount < WorkspaceConstants.MinimumCellCount || proposedCellCount > WorkspaceConstants.MaximumCellCount)
                 throw new InvalidDataException("Resolved layout CellCount is outside the supported 4-12 range.");
 
             ValidateGridLayoutState(state.Grid, proposedCellCount);
@@ -1395,10 +1391,13 @@ namespace NativeEndpointWorkspace
 
             foreach (ShortcutBinding binding in proposedShortcuts)
             {
-                if (binding.CellId < 1 || binding.CellId > MaxCellCount)
+                if (binding.CellId < 1 || binding.CellId > WorkspaceConstants.MaximumCellCount)
                     throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
-                if (binding.KeyCode <= 0 || binding.KeyCode > 0xFF)
-                    throw new InvalidDataException("Layout contains an invalid shortcut virtual-key code.");
+                if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
+                    binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
+                    throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F12 range.");
+                if (!binding.HasModifier)
+                    throw new InvalidDataException("Layout contains a bare global function-key shortcut. At least one modifier is required.");
             }
 
             string duplicate = proposedShortcuts.Where(x => x.CellId <= proposedCellCount)
@@ -1446,22 +1445,22 @@ namespace NativeEndpointWorkspace
 
         private static void ValidateFinitePositiveWeight(double value, string name)
         {
-            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0 || value > 1000000)
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0 || value > WorkspaceConstants.MaximumLayoutWeight)
                 throw new InvalidDataException("Layout contains an invalid " + name + ".");
         }
 
         private static int ResolveLoadedCellCount(WorkspaceState state)
         {
             if (state == null)
-                return DefaultCellCount;
+                return WorkspaceConstants.DefaultCellCount;
 
-            if (state.CellCount >= MinCellCount && state.CellCount <= MaxCellCount)
+            if (state.CellCount >= WorkspaceConstants.MinimumCellCount && state.CellCount <= WorkspaceConstants.MaximumCellCount)
                 return state.CellCount;
 
-            if (state.Cells != null && state.Cells.Count >= MinCellCount)
-                return Math.Max(MinCellCount, Math.Min(MaxCellCount, state.Cells.Count));
+            if (state.Cells != null && state.Cells.Count >= WorkspaceConstants.MinimumCellCount)
+                return Math.Max(WorkspaceConstants.MinimumCellCount, Math.Min(WorkspaceConstants.MaximumCellCount, state.Cells.Count));
 
-            return DefaultCellCount;
+            return WorkspaceConstants.DefaultCellCount;
         }
 
         private IList<ShortcutBinding> MergeLoadedShortcutBindings(IList<ShortcutBinding> loaded)
@@ -1470,7 +1469,7 @@ namespace NativeEndpointWorkspace
             var byCell = defaults.ToDictionary(x => x.CellId, x => x);
             if (loaded != null)
             {
-                foreach (ShortcutBinding binding in loaded.Where(x => x != null && x.CellId >= 1 && x.CellId <= MaxCellCount))
+                foreach (ShortcutBinding binding in loaded.Where(x => x != null && x.CellId >= 1 && x.CellId <= WorkspaceConstants.MaximumCellCount))
                     byCell[binding.CellId] = binding.Clone();
             }
             return byCell.Values.OrderBy(x => x.CellId).ToList();

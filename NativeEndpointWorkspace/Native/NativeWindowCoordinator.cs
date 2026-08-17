@@ -7,9 +7,6 @@ namespace NativeEndpointWorkspace.Native
 {
     public class NativeWindowCoordinator
     {
-        private const int RectTolerance = 3;
-        private const int WindowTextCapacity = 512;
-        private const int WindowClassCapacity = 256;
 
         public IntPtr GetForegroundWindow()
         {
@@ -41,10 +38,10 @@ namespace NativeEndpointWorkspace.Native
 
         public NativeEndpoint DescribeWindow(int cellId, IntPtr hwnd)
         {
-            var title = new StringBuilder(WindowTextCapacity);
+            var title = new StringBuilder(WorkspaceConstants.WindowTextCapacity);
             NativeMethods.GetWindowText(hwnd, title, title.Capacity);
 
-            var className = new StringBuilder(WindowClassCapacity);
+            var className = new StringBuilder(WorkspaceConstants.WindowClassCapacity);
             NativeMethods.GetClassName(hwnd, className, className.Capacity);
 
             uint processId;
@@ -99,7 +96,7 @@ namespace NativeEndpointWorkspace.Native
 
             if (!string.IsNullOrEmpty(endpoint.WindowClassName))
             {
-                var className = new StringBuilder(WindowClassCapacity);
+                var className = new StringBuilder(WorkspaceConstants.WindowClassCapacity);
                 if (NativeMethods.GetClassName(endpoint.Handle, className, className.Capacity) > 0 &&
                     !string.Equals(className.ToString(), endpoint.WindowClassName, StringComparison.Ordinal))
                     return EndpointIdentityStatus.WindowClassChanged;
@@ -308,10 +305,10 @@ namespace NativeEndpointWorkspace.Native
 
             int currentWidth = rect.Right - rect.Left;
             int currentHeight = rect.Bottom - rect.Top;
-            return Math.Abs(rect.Left - x) <= RectTolerance &&
-                   Math.Abs(rect.Top - y) <= RectTolerance &&
-                   Math.Abs(currentWidth - width) <= RectTolerance &&
-                   Math.Abs(currentHeight - height) <= RectTolerance;
+            return Math.Abs(rect.Left - x) <= WorkspaceConstants.WindowRectangleTolerance &&
+                   Math.Abs(rect.Top - y) <= WorkspaceConstants.WindowRectangleTolerance &&
+                   Math.Abs(currentWidth - width) <= WorkspaceConstants.WindowRectangleTolerance &&
+                   Math.Abs(currentHeight - height) <= WorkspaceConstants.WindowRectangleTolerance;
         }
     }
 }

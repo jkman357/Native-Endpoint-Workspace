@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Threading;
+using NativeEndpointWorkspace.Core;
 
 namespace NativeEndpointWorkspace.UI
 {
@@ -17,7 +18,7 @@ namespace NativeEndpointWorkspace.UI
             Width = Math.Max(80, screenBounds.Width);
             Height = Math.Max(80, screenBounds.Height);
 
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
+            _timer = new DispatcherTimer { Interval = WorkspaceConstants.IdentifyOverlayDuration };
             _timer.Tick += Timer_Tick;
             Loaded += delegate { _timer.Start(); };
         }

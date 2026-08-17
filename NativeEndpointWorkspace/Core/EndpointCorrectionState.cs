@@ -4,9 +4,6 @@ namespace NativeEndpointWorkspace.Core
 {
     public sealed class EndpointCorrectionState
     {
-        private static readonly TimeSpan BurstWindow = TimeSpan.FromMilliseconds(1500);
-        private static readonly TimeSpan BackoffDuration = TimeSpan.FromSeconds(3);
-        private const int MaximumCorrectionsPerBurst = 4;
 
         public int ConsecutiveCorrections { get; private set; }
         public DateTime BurstStartedUtc { get; private set; }
@@ -19,17 +16,17 @@ namespace NativeEndpointWorkspace.Core
 
         public bool RecordCorrectionAttempt(DateTime nowUtc)
         {
-            if (BurstStartedUtc == default(DateTime) || nowUtc - BurstStartedUtc > BurstWindow)
+            if (BurstStartedUtc == default(DateTime) || nowUtc - BurstStartedUtc > WorkspaceConstants.CorrectionBurstWindow)
             {
                 BurstStartedUtc = nowUtc;
                 ConsecutiveCorrections = 0;
             }
 
             ConsecutiveCorrections++;
-            if (ConsecutiveCorrections < MaximumCorrectionsPerBurst)
+            if (ConsecutiveCorrections < WorkspaceConstants.MaximumCorrectionsPerBurst)
                 return false;
 
-            BackoffUntilUtc = nowUtc.Add(BackoffDuration);
+            BackoffUntilUtc = nowUtc.Add(WorkspaceConstants.CorrectionBackoffDuration);
             ConsecutiveCorrections = 0;
             BurstStartedUtc = nowUtc;
             return true;

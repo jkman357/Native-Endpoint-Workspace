@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Version:** v0.0.1rc08  
+**Version:** v0.0.1rc09  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2
 
 Native Endpoint Workspace is a Windows technical POC for arranging and managing independent native top-level application windows as adaptive tiled **Native Endpoints** without embedding or reparenting them.
@@ -23,31 +23,25 @@ The implementation deliberately does **not** use:
 - `WriteProcessMemory`
 - `TerminateProcess`
 
-## rc08 focus — Foreground Group, Size Accommodation, and Review Medium Findings
+## rc09 focus — Static Review Cleanup (#8 / #9 / #11 / #12)
 
-rc08 preserves the rc06/rc07 real-machine tiled-window baseline and closes the next reliability tranche without adding unrelated features.
+rc09 is an engineering-cleanup RC. It preserves the rc08 foreground-group, size-accommodation, transactional-load, and native-result behavior while closing the remaining low/medium static-review cleanup tranche before the next full review.
 
-### Managed Endpoint Foreground Group
+### Review #8 — layout commit semantic clarity
 
-When any bound endpoint becomes foreground, the Workspace now re-establishes the **whole bound endpoint group above the opaque WPF Workspace** by moving only the Workspace behind each healthy endpoint. It no longer relies on a race between multiple asynchronous endpoint-raise requests. The user's clicked endpoint remains naturally active; the Workspace does not call `SetForegroundWindow`, `SetFocus`, or synthesize input.
+The old `authoritativeFinal` concept is no longer used. Queue callers now explicitly request only whether completion status should be surfaced; correctness is identical for every Native Layout Commit. Coalesced requests preserve a pending completion-status request rather than silently discarding it.
 
-### Endpoint Size Accommodation
+### Review #9 — centralized behavior constants
 
-Some applications, such as Windows Calculator modes, enforce a minimum top-level window size. After an asynchronous geometry request, rc08 verifies the settled window rectangle. If the endpoint accepted the Cell position but rejected the requested width/height, the Workspace treats the observed larger size as a minimum-size constraint instead of fighting it indefinitely.
+Application-specific tuning values and shortcut/version constants are centralized in `WorkspaceConstants`, including supported Cell limits, F-key range, hotkey ID base, layout minimums, correction/backoff timing, endpoint-health timing, Identify duration, and native text-buffer capacities. Named Win32 constants remain in `NativeMethods`.
 
-The affected Cell/row receives a larger minimum allocation; neighboring Cells give up space first, and a normal-state Workspace may grow up to the current monitor work area when the existing canvas cannot satisfy the learned minimums. Unbinding the endpoint releases its learned Cell minimum.
+### Review #11 — fail-fast Cell topology
 
-### Review #5 — explicit no-activation group minimize/restore
+`GetRowCellCounts()` now explicitly handles Cell counts 4 through 12 and throws `ArgumentOutOfRangeException` for unsupported values. It no longer silently converts an unexpected value into a 12-Cell topology.
 
-Group lifecycle commands now use `ShowWindowAsync` with no-activation show states (`SW_SHOWMINNOACTIVE` / `SW_SHOWNOACTIVATE`). Geometry and Z-order maintenance continue to use no-activation policies. Natural user clicks are the activation mechanism.
+### Review #12 — bare global F-key protection
 
-### Review #6 — transactional layout loading
-
-Layout files are deserialized and fully validated before active Workspace state is mutated. rc08 validates Cell range, adaptive row structure, finite positive layout weights, shortcut ranges, and duplicate active gestures. If commit of a validated layout throws, the previous Cell count, tiling, shortcuts, runtime bindings, and learned size constraints are restored on a best-effort rollback path.
-
-### Review #7 — native-operation result reporting
-
-Native layout commits now aggregate geometry outcomes, stale/hung/minimized skips, Win32 geometry failures, and Workspace Z-order anchor failures. Explicit Resync and failed background commits surface structured status instead of always claiming success.
+Shortcut registration now requires at least one modifier (`Ctrl`, `Shift`, `Alt`, or `Win`). Bare global `F1` through `F12` registrations are rejected so the Workspace cannot silently intercept common application commands such as Help, Rename, Refresh, Full Screen, or developer shortcuts. Layout-file validation enforces the same rule transactionally.
 
 ## Adaptive tiled layout
 
@@ -187,22 +181,22 @@ run.cmd
 
 The POC starts on .NET Framework 4.7.2 for compatibility with the initial test machine. Native/Services boundaries remain separated so a later migration to modern .NET/WPF does not require changing the Native Endpoint concept.
 
-## rc08 regression / hardening test
+## rc09 regression / review-closure test
 
-1. Bind four separate Firefox top-level windows plus Notepad++, Command Prompt/Terminal, and Windows Calculator.
-2. Click repeatedly among Firefox, console, editor, and Calculator. No other bound endpoint should disappear behind the Workspace.
-3. Move/resize/maximize/restore the Workspace and drag Cell splitters; all bound endpoints must follow the current Cell geometry.
-4. Bind an application that rejects a Cell size. Verify the Cell/row allocation expands and, when necessary in normal state, the Workspace grows within the monitor work area instead of entering an endless correction fight.
-5. Unbind that endpoint and verify its learned size constraint is released.
-6. Minimize/Restore Group and verify endpoints do not steal activation sequentially.
-7. Load a malformed/incompatible layout and verify the previously working layout/bindings remain intact.
-8. Use `Resync Endpoints` and verify the status reports geometry/Z-order failures or stale/hung skips rather than unconditional success.
-9. Re-run rc07 identity/destroy/backoff tests and rc06 resize/maximize regression tests.
-10. Close the Workspace and verify only still-bound, strongly revalidated endpoints receive graceful `WM_CLOSE`.
+1. Build and run on the Windows 10 / .NET Framework 4.7.2 test machine.
+2. Re-run rc08 mixed-endpoint tests: Firefox, Notepad++, console/Terminal, and Calculator.
+3. Resize/maximize/restore the Workspace and drag splitters; bound endpoints must preserve rc08 geometry/Z-order behavior.
+4. In Shortcut Settings, clear all modifiers for an F-key and apply. Verify the shortcut is rejected and not registered globally.
+5. Verify modified F-key shortcuts still register and bind the correct foreground endpoint.
+6. Load a layout containing a bare F-key shortcut and verify transactional validation rejects it without destroying the current working state.
+7. Exercise Cell counts 4 through 12 and verify each supported topology builds correctly.
+8. Confirm unsupported Cell counts fail validation rather than silently becoming a 12-Cell layout.
+9. Save a layout and verify the serialized version is `0.0.1rc09`; runtime HWND identity remains non-persistent.
+10. Run a new full static Code Review and classify all original 12 findings as CLOSED, ACCEPTED RISK, or DEFERRED based on rc09 source.
 
 ## Current maturity
 
-**POC / hardening stage.** rc08 preserves the working Native Endpoint layout model while addressing foreground-group Z-order, endpoint minimum-size accommodation, explicit no-activation group restore/minimize policy, transactional layout loading, and structured native layout result reporting. Remaining static-review cleanup items are intentionally deferred to the next RC rather than mixed into this reliability tranche.
+**POC / hardening stage.** rc09 preserves the working rc08 Native Endpoint layout model and closes the planned static-review cleanup tranche (#8, #9, #11, #12). A fresh full review is required before declaring the original 12 findings closed as a set; rc09 does not claim production readiness by itself.
 
 ## License
 

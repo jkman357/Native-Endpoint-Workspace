@@ -37,6 +37,12 @@ namespace NativeEndpointWorkspace.Core
             };
         }
 
+        [XmlIgnore]
+        public bool HasModifier
+        {
+            get { return Control || Shift || Alt || Win; }
+        }
+
         public string GestureText
         {
             get
@@ -55,8 +61,8 @@ namespace NativeEndpointWorkspace.Core
         {
             get
             {
-                if (KeyCode >= 0x70 && KeyCode <= 0x7B)
-                    return "F" + (KeyCode - 0x6F);
+                if (KeyCode >= WorkspaceConstants.FunctionKeyFirstVirtualKey && KeyCode <= WorkspaceConstants.FunctionKeyLastVirtualKey)
+                    return "F" + (KeyCode - WorkspaceConstants.FunctionKeyDisplayOffset);
                 return "VK_0x" + KeyCode.ToString("X2");
             }
         }

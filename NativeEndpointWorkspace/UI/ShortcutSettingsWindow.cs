@@ -46,7 +46,8 @@ namespace NativeEndpointWorkspace.UI
             {
                 Text = "Each shortcut assigns the current foreground top-level window to its Cell. " +
                        "Conflicts are detected both inside this workspace and by Windows RegisterHotKey. " +
-                       "A conflicting shortcut remains inactive; other valid shortcuts can still register.",
+                       "At least one modifier (Ctrl, Shift, Alt, or Win) is required; bare F1-F12 global hotkeys are rejected. " +
+                       "A conflicting or unsafe shortcut remains inactive; other valid shortcuts can still register.",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10)
             };
@@ -54,7 +55,7 @@ namespace NativeEndpointWorkspace.UI
             root.Children.Add(explanation);
 
             var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-            var apply = new Button { Content = "Apply / Detect Conflicts", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(4, 0, 0, 0) };
+            var apply = new Button { Content = "Apply / Validate", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(4, 0, 0, 0) };
             apply.Click += Apply_Click;
             var close = new Button { Content = "Close", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(4, 0, 0, 0) };
             close.Click += delegate { Close(); };
@@ -109,8 +110,8 @@ namespace NativeEndpointWorkspace.UI
             var win = AddCheck(grid, binding.Win, 4);
 
             var key = new ComboBox { Margin = new Thickness(3), MinWidth = 70 };
-            for (int i = 1; i <= 12; i++) key.Items.Add("F" + i);
-            key.SelectedIndex = Math.Max(0, Math.Min(11, binding.KeyCode - 0x70));
+            for (int i = 1; i <= WorkspaceConstants.FunctionKeyCount; i++) key.Items.Add("F" + i);
+            key.SelectedIndex = Math.Max(0, Math.Min(WorkspaceConstants.FunctionKeyCount - 1, binding.KeyCode - WorkspaceConstants.FunctionKeyFirstVirtualKey));
             Grid.SetColumn(key, 5);
             grid.Children.Add(key);
 
@@ -130,7 +131,7 @@ namespace NativeEndpointWorkspace.UI
                 row.Binding.Shift = row.Shift.IsChecked == true;
                 row.Binding.Alt = row.Alt.IsChecked == true;
                 row.Binding.Win = row.Win.IsChecked == true;
-                row.Binding.KeyCode = 0x70 + Math.Max(0, row.Key.SelectedIndex);
+                row.Binding.KeyCode = WorkspaceConstants.FunctionKeyFirstVirtualKey + Math.Max(0, row.Key.SelectedIndex);
             }
 
             string summary;

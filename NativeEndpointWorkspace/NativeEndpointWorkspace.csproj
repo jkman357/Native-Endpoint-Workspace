@@ -75,6 +75,7 @@
     <Compile Include="Core\NativeLayoutCommitResult.cs" />
     <Compile Include="Core\ShortcutBinding.cs" />
     <Compile Include="Core\WorkspaceState.cs" />
+    <Compile Include="Core\WorkspaceConstants.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\NativeWindowCoordinator.cs" />
     <Compile Include="Services\EndpointRegistry.cs" />

@@ -20,7 +20,7 @@ namespace NativeEndpointWorkspace.Services
         public IList<ShortcutBinding> CreateDefaultBindings()
         {
             var list = new List<ShortcutBinding>();
-            for (int i = 1; i <= 12; i++)
+            for (int i = 1; i <= WorkspaceConstants.FunctionKeyCount; i++)
             {
                 list.Add(new ShortcutBinding
                 {
@@ -29,7 +29,7 @@ namespace NativeEndpointWorkspace.Services
                     Shift = true,
                     Alt = false,
                     Win = false,
-                    KeyCode = 0x6F + i,
+                    KeyCode = WorkspaceConstants.FunctionKeyDisplayOffset + i,
                     Status = "Not registered"
                 });
             }
@@ -60,6 +60,23 @@ namespace NativeEndpointWorkspace.Services
             int failureCount = 0;
             foreach (var binding in requested.OrderBy(x => x.CellId))
             {
+                // Review #12: do not register bare F1-F12 globally. Those keys are
+                // common application commands (Help/Rename/Refresh/Full Screen/etc.).
+                if (!binding.HasModifier)
+                {
+                    binding.Status = "Rejected: at least one modifier is required";
+                    failureCount++;
+                    continue;
+                }
+
+                if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
+                    binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
+                {
+                    binding.Status = "Rejected: only F1-F12 are supported";
+                    failureCount++;
+                    continue;
+                }
+
                 if (duplicateKeys.Contains(binding.ConflictKey))
                 {
                     binding.Status = "Conflict: duplicate inside workspace";
@@ -88,19 +105,22 @@ namespace NativeEndpointWorkspace.Services
                 return true;
             }
 
-            summary = (requested.Count - failureCount) + " shortcut(s) registered; " + failureCount + " conflict(s) detected.";
+            summary = (requested.Count - failureCount) + " shortcut(s) registered; " + failureCount + " conflict/validation issue(s) detected.";
             return false;
         }
 
         public int CellIdFromHotKeyId(int hotKeyId)
         {
-            int cellId = hotKeyId - 5000;
-            return cellId >= 1 && cellId <= 12 ? cellId : 0;
+            int cellId = hotKeyId - WorkspaceConstants.HotKeyIdBase;
+            return cellId >= 1 &&
+                   cellId <= WorkspaceConstants.MaximumCellCount ? cellId : 0;
         }
 
         public static int HotKeyIdForCell(int cellId)
         {
-            return 5000 + cellId;
+            if (cellId < 1 || cellId > WorkspaceConstants.MaximumCellCount)
+                throw new ArgumentOutOfRangeException(nameof(cellId));
+            return WorkspaceConstants.HotKeyIdBase + cellId;
         }
 
         private static uint BuildModifiers(ShortcutBinding binding)
