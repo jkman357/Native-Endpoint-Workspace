@@ -46,7 +46,7 @@ namespace NativeEndpointWorkspace.UI
                 Text = "Each shortcut assigns the current foreground top-level window to its Cell. " +
                        "Conflicts are detected both inside this workspace and by Windows RegisterHotKey. " +
                        "Use one or more Ctrl / Alt / Shift modifiers. Bare F1-F12 and Win-key global hotkeys are rejected to reduce collisions with normal application and Windows shortcuts. " +
-                       "Conflicting or unavailable shortcuts remain inactive; other valid shortcuts can still register.",
+                       "Shortcut apply is all-or-nothing: if Windows rejects any requested hotkey, the previous working shortcut set is restored.",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10)
             };
@@ -121,21 +121,31 @@ namespace NativeEndpointWorkspace.UI
 
         private void Apply_Click(object sender, RoutedEventArgs e)
         {
+            var candidate = new List<ShortcutBinding>();
             foreach (var row in _rows)
             {
-                row.Binding.Control = row.Ctrl.IsChecked == true;
-                row.Binding.Shift = row.Shift.IsChecked == true;
-                row.Binding.Alt = row.Alt.IsChecked == true;
-                row.Binding.Win = false;
-                row.Binding.KeyCode = WorkspaceConstants.FunctionKeyFirstVirtualKey + Math.Max(0, row.Key.SelectedIndex);
+                ShortcutBinding binding = row.Binding.Clone();
+                binding.Control = row.Ctrl.IsChecked == true;
+                binding.Shift = row.Shift.IsChecked == true;
+                binding.Alt = row.Alt.IsChecked == true;
+                binding.Win = false;
+                binding.KeyCode = WorkspaceConstants.FunctionKeyFirstVirtualKey + Math.Max(0, row.Key.SelectedIndex);
+                candidate.Add(binding);
             }
 
             string summary;
-            _service.ApplyBindings(AppliedBindings, out summary);
+            bool applied = _service.ApplyBindings(candidate, out summary);
             _summary.Text = summary;
-            foreach (var row in _rows)
-                row.Status.Text = row.Binding.Status;
-            AppliedBindings = _rows.Select(x => x.Binding.Clone()).OrderBy(x => x.CellId).ToList();
+
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                _rows[i].Status.Text = candidate[i].Status;
+                if (applied)
+                    _rows[i].Binding = candidate[i].Clone();
+            }
+
+            if (applied)
+                AppliedBindings = candidate.Select(x => x.Clone()).OrderBy(x => x.CellId).ToList();
         }
 
         private static Grid CreateGrid()

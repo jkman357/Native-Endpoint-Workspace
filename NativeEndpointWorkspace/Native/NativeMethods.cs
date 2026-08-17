@@ -7,10 +7,10 @@ namespace NativeEndpointWorkspace.Native
     internal static class NativeMethods
     {
         internal const int WM_HOTKEY = 0x0312;
-        internal const int WM_CLOSE = 0x0010;
         internal const int WM_WINDOWPOSCHANGED = 0x0047;
         internal const int WM_ENTERSIZEMOVE = 0x0231;
         internal const int WM_EXITSIZEMOVE = 0x0232;
+        internal const int WM_DPICHANGED = 0x02E0;
 
         internal const uint MOD_ALT = 0x0001;
         internal const uint MOD_CONTROL = 0x0002;
@@ -115,9 +115,6 @@ namespace NativeEndpointWorkspace.Native
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

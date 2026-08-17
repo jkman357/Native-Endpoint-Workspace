@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Linq;
 using NativeEndpointWorkspace.Core;
 using NativeEndpointWorkspace.Native;
@@ -10,11 +9,16 @@ namespace NativeEndpointWorkspace.Services
     public class ShortcutService : IDisposable
     {
         private readonly IntPtr _windowHandle;
+        private readonly IHotKeyRegistrar _registrar;
         private readonly Dictionary<int, ShortcutBinding> _active = new Dictionary<int, ShortcutBinding>();
 
-        public ShortcutService(IntPtr windowHandle)
+        public ShortcutService(IntPtr windowHandle) : this(windowHandle, new NativeHotKeyRegistrar()) { }
+
+        public ShortcutService(IntPtr windowHandle, IHotKeyRegistrar registrar)
         {
+            if (registrar == null) throw new ArgumentNullException(nameof(registrar));
             _windowHandle = windowHandle;
+            _registrar = registrar;
         }
 
         public IList<ShortcutBinding> CreateDefaultBindings()
@@ -50,78 +54,117 @@ namespace NativeEndpointWorkspace.Services
                 return false;
             }
 
+            string validationSummary;
+            if (!ValidateRequested(requested, out validationSummary))
+            {
+                summary = validationSummary + " Existing global shortcuts were left unchanged.";
+                return false;
+            }
+
+            IList<ShortcutBinding> previous = ActiveBindings;
             UnregisterAll();
 
+            string applySummary;
+            if (TryRegisterSet(requested, out applySummary))
+            {
+                summary = applySummary;
+                return true;
+            }
+
+            // All-or-nothing transaction: remove any partially registered requested set and
+            // restore the last known working registration set.
+            UnregisterAll();
+            string rollbackSummary;
+            bool rollbackOk = previous.Count == 0 || TryRegisterSet(previous, out rollbackSummary);
+            summary = applySummary + (rollbackOk
+                ? " Registration transaction rolled back to the previous working shortcut set."
+                : " WARNING: rollback of the previous shortcut set was not fully successful: " + rollbackSummary);
+            return false;
+        }
+
+        private bool ValidateRequested(IList<ShortcutBinding> requested, out string summary)
+        {
             var duplicateKeys = new HashSet<string>(
-                requested.GroupBy(x => x.ConflictKey)
+                requested.Where(x => x != null)
+                         .GroupBy(x => x.ConflictKey)
                          .Where(g => g.Count() > 1)
                          .Select(g => g.Key));
-
-            int failureCount = 0;
-            foreach (var binding in requested.OrderBy(x => x.CellId))
+            int failures = 0;
+            foreach (ShortcutBinding binding in requested)
             {
-                // rc11 shortcut policy: use Ctrl / Alt / Shift combinations only.
-                // Bare F1-F12 and Win-key global combinations are rejected to reduce
-                // collisions with normal application and Windows shell shortcuts.
+                if (binding == null)
+                {
+                    failures++;
+                    continue;
+                }
                 if (binding.Win)
                 {
                     binding.Status = "Rejected: Win modifier is not supported";
-                    failureCount++;
+                    failures++;
                     continue;
                 }
-
                 if (!binding.HasSupportedModifier)
                 {
                     binding.Status = "Rejected: Ctrl, Alt, or Shift is required";
-                    failureCount++;
+                    failures++;
                     continue;
                 }
-
                 if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
                     binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
                 {
                     binding.Status = "Rejected: only F1-F12 are supported";
-                    failureCount++;
+                    failures++;
                     continue;
                 }
-
+                if (binding.CellId < 1 || binding.CellId > WorkspaceConstants.MaximumCellCount)
+                {
+                    binding.Status = "Rejected: invalid Cell ID";
+                    failures++;
+                    continue;
+                }
                 if (duplicateKeys.Contains(binding.ConflictKey))
                 {
                     binding.Status = "Conflict: duplicate inside workspace";
-                    failureCount++;
+                    failures++;
                     continue;
                 }
+                binding.Status = "Validated";
+            }
 
+            summary = failures == 0
+                ? "Shortcut request validated."
+                : failures + " shortcut validation issue(s) detected.";
+            return failures == 0;
+        }
+
+        private bool TryRegisterSet(IList<ShortcutBinding> bindings, out string summary)
+        {
+            int success = 0;
+            foreach (ShortcutBinding binding in bindings.OrderBy(x => x.CellId))
+            {
                 int id = HotKeyIdForCell(binding.CellId);
                 uint modifiers = BuildModifiers(binding) | NativeMethods.MOD_NOREPEAT;
-                bool ok = NativeMethods.RegisterHotKey(_windowHandle, id, modifiers, (uint)binding.KeyCode);
-                if (!ok)
+                int nativeError;
+                if (!_registrar.Register(_windowHandle, id, modifiers, (uint)binding.KeyCode, out nativeError))
                 {
-                    int nativeError = new Win32Exception().NativeErrorCode;
                     binding.Status = "Conflict/unavailable (Win32 " + nativeError + ")";
-                    failureCount++;
-                    continue;
+                    summary = success + " shortcut(s) registered before Cell " + binding.CellId + " failed; requested set not committed.";
+                    return false;
                 }
 
                 binding.Status = "Registered";
                 _active[binding.CellId] = binding.Clone();
+                success++;
             }
 
-            if (failureCount == 0)
-            {
-                summary = "All " + requested.Count + " shortcuts registered.";
-                return true;
-            }
-
-            summary = (requested.Count - failureCount) + " shortcut(s) registered; " + failureCount + " conflict/validation issue(s) detected.";
-            return false;
+            summary = "All " + bindings.Count + " shortcuts registered transactionally.";
+            return true;
         }
 
         public int CellIdFromHotKeyId(int hotKeyId)
         {
             int cellId = hotKeyId - WorkspaceConstants.HotKeyIdBase;
-            return cellId >= 1 &&
-                   cellId <= WorkspaceConstants.MaximumCellCount ? cellId : 0;
+            return cellId >= 1 && cellId <= WorkspaceConstants.MaximumCellCount ? cellId : 0;
         }
 
         public static int HotKeyIdForCell(int cellId)
@@ -143,7 +186,7 @@ namespace NativeEndpointWorkspace.Services
         public void UnregisterAll()
         {
             foreach (int cellId in _active.Keys.ToArray())
-                NativeMethods.UnregisterHotKey(_windowHandle, HotKeyIdForCell(cellId));
+                _registrar.Unregister(_windowHandle, HotKeyIdForCell(cellId));
             _active.Clear();
         }
 

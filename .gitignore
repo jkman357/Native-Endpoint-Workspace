@@ -9,3 +9,5 @@
 [Rr]elease/
 TestResults/
 *.log
+
+logs/

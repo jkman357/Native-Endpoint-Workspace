@@ -36,6 +36,11 @@ namespace NativeEndpointWorkspace.Native
             return IsEndpointIdentityCurrent(endpoint, false) && NativeMethods.IsHungAppWindow(endpoint.Handle);
         }
 
+        public bool IsVisible(NativeEndpoint endpoint)
+        {
+            return IsEndpointIdentityCurrent(endpoint, false) && NativeMethods.IsWindowVisible(endpoint.Handle);
+        }
+
         public NativeEndpoint DescribeWindow(int cellId, IntPtr hwnd)
         {
             var title = new StringBuilder(WorkspaceConstants.WindowTextCapacity);
@@ -86,7 +91,11 @@ namespace NativeEndpointWorkspace.Native
 
         public EndpointIdentityStatus ValidateEndpointIdentity(NativeEndpoint endpoint, bool requireStrongProcessCheck)
         {
-            if (endpoint == null || endpoint.Handle == IntPtr.Zero || !NativeMethods.IsWindow(endpoint.Handle))
+            if (endpoint == null || endpoint.Handle == IntPtr.Zero)
+                return EndpointIdentityStatus.WindowMissing;
+            if (endpoint.DestroyObserved)
+                return EndpointIdentityStatus.DestroyObserved;
+            if (!NativeMethods.IsWindow(endpoint.Handle))
                 return EndpointIdentityStatus.WindowMissing;
 
             uint currentProcessId;
@@ -102,14 +111,14 @@ namespace NativeEndpointWorkspace.Native
                     return EndpointIdentityStatus.WindowClassChanged;
             }
 
-            if (requireStrongProcessCheck && endpoint.ProcessStartTimeUtcTicks > 0)
+            if (requireStrongProcessCheck)
             {
                 long currentStartTimeUtcTicks;
-                if (!TryGetProcessStartTimeUtcTicks(currentProcessId, out currentStartTimeUtcTicks))
-                    return EndpointIdentityStatus.ProcessStartTimeUnavailable;
-
-                if (currentStartTimeUtcTicks != endpoint.ProcessStartTimeUtcTicks)
-                    return EndpointIdentityStatus.ProcessStartTimeChanged;
+                bool available = TryGetProcessStartTimeUtcTicks(currentProcessId, out currentStartTimeUtcTicks);
+                EndpointIdentityStatus strongStatus = EndpointIdentityPolicy.EvaluateStrongProcessStart(
+                    endpoint.ProcessStartTimeUtcTicks, available, currentStartTimeUtcTicks);
+                if (strongStatus != EndpointIdentityStatus.Current)
+                    return strongStatus;
             }
 
             return EndpointIdentityStatus.Current;
@@ -331,16 +340,6 @@ namespace NativeEndpointWorkspace.Native
             right = info.rcWork.Right;
             bottom = info.rcWork.Bottom;
             return true;
-        }
-
-        public bool RequestClose(NativeEndpoint endpoint)
-        {
-            // WM_CLOSE is destructive. Revalidate the strong endpoint identity immediately
-            // before posting so a stale/reused HWND is not treated as the original endpoint.
-            if (!IsEndpointIdentityCurrent(endpoint, true))
-                return false;
-
-            return NativeMethods.PostMessage(endpoint.Handle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
         }
 
         private static bool TryGetProcessStartTimeUtcTicks(uint processId, out long ticks)

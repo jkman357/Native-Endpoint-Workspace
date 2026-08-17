@@ -14,6 +14,7 @@
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -76,9 +77,15 @@
     <Compile Include="Core\ShortcutBinding.cs" />
     <Compile Include="Core\WorkspaceState.cs" />
     <Compile Include="Core\WorkspaceConstants.cs" />
+    <Compile Include="Core\EndpointIdentityPolicy.cs" />
+    <Compile Include="Core\LayoutTopologyPolicy.cs" />
+    <Compile Include="Core\LayoutVersionPolicy.cs" />
+    <Compile Include="Core\WorkspaceStateValidator.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\NativeWindowCoordinator.cs" />
     <Compile Include="Services\EndpointRegistry.cs" />
+    <Compile Include="Services\IHotKeyRegistrar.cs" />
+    <Compile Include="Services\RuntimeLogService.cs" />
     <Compile Include="Services\EndpointLayoutLockService.cs" />
     <Compile Include="Services\LayoutService.cs" />
     <Compile Include="Services\ShortcutService.cs" />
@@ -89,6 +96,10 @@
       <DependentUpon>IdentifyOverlayWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="UI\ShortcutSettingsWindow.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <None Include="app.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

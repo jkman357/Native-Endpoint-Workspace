@@ -5,7 +5,7 @@ using NativeEndpointWorkspace.Native;
 
 namespace NativeEndpointWorkspace.Services
 {
-    // Observes external top-level windows without injection. rc10 filters managed HWNDs
+    // Observes external top-level windows without injection. managed HWNDs are filtered
     // inside the WinEvent callback before WPF Dispatcher work is created.
     public sealed class EndpointLayoutLockService : IDisposable
     {
@@ -93,16 +93,15 @@ namespace NativeEndpointWorkspace.Services
             if (_disposed || hwnd == IntPtr.Zero)
                 return;
 
-            bool isManaged;
-            bool isWorkspace;
-            lock (_managedHandleLock)
-            {
-                isManaged = _managedHandles.Contains(hwnd);
-                isWorkspace = hwnd == _workspaceHwnd;
-            }
-
             if (eventType == NativeMethods.EVENT_SYSTEM_FOREGROUND)
             {
+                bool isManaged;
+                bool isWorkspace;
+                lock (_managedHandleLock)
+                {
+                    isManaged = _managedHandles.Contains(hwnd);
+                    isWorkspace = hwnd == _workspaceHwnd;
+                }
                 if (!isWorkspace && !isManaged)
                     return;
 
@@ -112,8 +111,14 @@ namespace NativeEndpointWorkspace.Services
                 return;
             }
 
+            // Object hooks are system-wide. Reject non-window/non-self events before touching
+            // the managed-handle lock so unrelated high-frequency WinEvents stay cheap.
             if (idObject != NativeMethods.OBJID_WINDOW || idChild != NativeMethods.CHILDID_SELF)
                 return;
+
+            bool isManaged;
+            lock (_managedHandleLock)
+                isManaged = _managedHandles.Contains(hwnd);
             if (!isManaged)
                 return;
 

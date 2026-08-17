@@ -1,9 +1,12 @@
 using System;
+using System.Threading;
 
 namespace NativeEndpointWorkspace.Core
 {
     public class NativeEndpoint
     {
+        private int _destroyObserved;
+
         public NativeEndpoint(
             int cellId,
             IntPtr handle,
@@ -22,6 +25,7 @@ namespace NativeEndpointWorkspace.Core
             ThreadId = threadId;
             ProcessStartTimeUtcTicks = processStartTimeUtcTicks;
             WindowClassName = windowClassName ?? string.Empty;
+            BindingInstanceId = Guid.NewGuid();
         }
 
         public int CellId { get; private set; }
@@ -32,6 +36,17 @@ namespace NativeEndpointWorkspace.Core
         public uint ThreadId { get; private set; }
         public long ProcessStartTimeUtcTicks { get; private set; }
         public string WindowClassName { get; private set; }
+        public Guid BindingInstanceId { get; private set; }
+
+        public bool DestroyObserved
+        {
+            get { return Volatile.Read(ref _destroyObserved) != 0; }
+        }
+
+        internal void MarkDestroyObserved()
+        {
+            Interlocked.Exchange(ref _destroyObserved, 1);
+        }
 
         public string DisplayName
         {

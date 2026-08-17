@@ -4,8 +4,8 @@ namespace NativeEndpointWorkspace.Core
 {
     internal static class WorkspaceConstants
     {
-        public const string Version = "0.0.1rc11";
-        public const string LayoutVersionCompatibilityPrefix = "0.0.1";
+        public const string Version = "0.0.1rc12";
+        public const int LayoutSchemaVersion = 1;
 
         public const int MinimumCellCount = 4;
         public const int MaximumCellCount = 12;
@@ -37,5 +37,9 @@ namespace NativeEndpointWorkspace.Core
         public static readonly TimeSpan InteractiveLayoutCommitInterval = TimeSpan.FromMilliseconds(45);
         public static readonly TimeSpan EndpointSizeVerificationDelay = TimeSpan.FromMilliseconds(220);
         public static readonly TimeSpan IdentifyOverlayDuration = TimeSpan.FromMilliseconds(1400);
+
+        public const long RuntimeLogMaxBytes = 5L * 1024L * 1024L;
+        public const int RuntimeLogRetentionFiles = 5;
+        public const int SlowLayoutCommitWarningMilliseconds = 50;
     }
 }

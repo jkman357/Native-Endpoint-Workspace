@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -24,6 +25,7 @@ namespace NativeEndpointWorkspace
         private readonly EndpointRegistry _registry = new EndpointRegistry();
         private readonly LayoutService _layoutService = new LayoutService();
         private readonly EndpointLayoutLockService _layoutLockService = new EndpointLayoutLockService();
+        private readonly RuntimeLogService _runtimeLog = RuntimeLogService.Shared;
         private readonly Dictionary<int, CellControl> _cells = new Dictionary<int, CellControl>();
         private readonly Dictionary<int, Grid> _rowGrids = new Dictionary<int, Grid>();
         private readonly Dictionary<int, List<int>> _rowCellIds = new Dictionary<int, List<int>>();
@@ -36,7 +38,9 @@ namespace NativeEndpointWorkspace
         private readonly Dictionary<IntPtr, EndpointCorrectionState> _correctionStates = new Dictionary<IntPtr, EndpointCorrectionState>();
         private readonly HashSet<IntPtr> _pendingLocationCorrections = new HashSet<IntPtr>();
         private readonly HashSet<IntPtr> _minimizedWithWorkspace = new HashSet<IntPtr>();
-        private readonly Dictionary<int, Rect> _lastCommittedCellRects = new Dictionary<int, Rect>();
+        // Async SetWindowPos separates submitted desired geometry from observed/verified geometry.
+        private readonly Dictionary<int, Rect> _lastRequestedCellRects = new Dictionary<int, Rect>();
+        private readonly Dictionary<int, Rect> _lastVerifiedCellRects = new Dictionary<int, Rect>();
         private readonly DispatcherTimer _windowHealthTimer;
         private readonly DispatcherTimer _interactiveCommitTimer;
 
@@ -83,8 +87,8 @@ namespace NativeEndpointWorkspace
             _layoutLockService.ForegroundChanged += LayoutLockService_ForegroundChanged;
             _layoutLockService.WindowDestroyed += LayoutLockService_WindowDestroyed;
 
-            // Slow health fallback only. rc10 keeps the deterministic LayoutUpdated commit
-            // path, but the timer corrects only an observed geometry/Z-order violation.
+            // Slow detection-only health fallback. Interactive/final commits are driven by
+            // explicit move/resize/splitter/DPI events, not by an unbounded LayoutUpdated path.
             _windowHealthTimer = new DispatcherTimer { Interval = WorkspaceConstants.EndpointHealthInterval };
             _windowHealthTimer.Tick += WindowHealthTimer_Tick;
 
@@ -121,7 +125,8 @@ namespace NativeEndpointWorkspace
             RefreshManagedHandleSnapshot();
             bool hookStarted = _layoutLockService.Start();
             ApplyEndpointMinimumConstraints();
-            _lastCommittedCellRects.Clear();
+            _lastRequestedCellRects.Clear();
+            _lastVerifiedCellRects.Clear();
             RequestFinalNativeLayoutCommit(false);
 
             StatusText.Text = hookStarted
@@ -151,22 +156,7 @@ namespace NativeEndpointWorkspace
 
         private static int[] GetRowCellCounts(int cellCount)
         {
-            switch (cellCount)
-            {
-                case 4: return new[] { 2, 2 };
-                case 5: return new[] { 3, 2 };
-                case 6: return new[] { 3, 3 };
-                case 7: return new[] { 4, 3 };
-                case 8: return new[] { 4, 4 };
-                case 9: return new[] { 3, 3, 3 };
-                case 10: return new[] { 4, 3, 3 };
-                case 11: return new[] { 4, 4, 3 };
-                case 12: return new[] { 4, 4, 4 };
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(cellCount), cellCount,
-                        "Cell count must be between " + WorkspaceConstants.MinimumCellCount +
-                        " and " + WorkspaceConstants.MaximumCellCount + ".");
-            }
+            return LayoutTopologyPolicy.GetRowCellCounts(cellCount);
         }
 
         private void BuildAdaptiveLayout(GridLayoutState requestedState)
@@ -345,6 +335,11 @@ namespace NativeEndpointWorkspace
             {
                 RequestFinalNativeLayoutCommit(false);
             }
+            else if (msg == NativeMethods.WM_DPICHANGED)
+            {
+                RequestFinalNativeLayoutCommit(false);
+                _runtimeLog.Info("DPI_CHANGED", "workspace=1");
+            }
 
             if (msg == NativeMethods.WM_HOTKEY && _shortcutService != null)
             {
@@ -397,6 +392,9 @@ namespace NativeEndpointWorkspace
 
             NativeEndpoint endpoint = _windowCoordinator.DescribeWindow(cellId, target);
             NativeEndpoint old = _registry.Bind(cellId, endpoint);
+            _runtimeLog.Info("ENDPOINT_BIND", RuntimeLogService.EndpointMetadata(endpoint));
+            if (endpoint.ProcessStartTimeUtcTicks <= 0)
+                _runtimeLog.Warn("ENDPOINT_IDENTITY_PARTIAL", RuntimeLogService.EndpointMetadata(endpoint) + " process_start_unavailable=1");
             if (old != null)
                 ClearEndpointRuntimeState(old);
             RefreshManagedHandleSnapshot();
@@ -416,7 +414,10 @@ namespace NativeEndpointWorkspace
             if (cell == null) return;
             NativeEndpoint old = _registry.UnbindCell(cell.CellId);
             if (old != null)
+            {
+                _runtimeLog.Info("ENDPOINT_DETACH", RuntimeLogService.EndpointMetadata(old) + " reason=user");
                 ClearEndpointRuntimeState(old);
+            }
             RefreshManagedHandleSnapshot();
             cell.SetEndpoint(null);
             StatusText.Text = old == null
@@ -446,7 +447,8 @@ namespace NativeEndpointWorkspace
                 _sizeVerificationTimers.Remove(endpoint.Handle);
             }
 
-            _lastCommittedCellRects.Remove(endpoint.CellId);
+            _lastRequestedCellRects.Remove(endpoint.CellId);
+            _lastVerifiedCellRects.Remove(endpoint.CellId);
             _cellMinimumHostWidths.Remove(endpoint.CellId);
             _cellMinimumHostHeights.Remove(endpoint.CellId);
             ApplyEndpointMinimumConstraints();
@@ -496,6 +498,14 @@ namespace NativeEndpointWorkspace
                                     Math.Abs(actualY - desired.Top) <= WorkspaceConstants.SizeVerificationPositionTolerance;
             bool widthRejected = actualWidth > desired.Width + WorkspaceConstants.SizeVerificationGrowthTolerance;
             bool heightRejected = actualHeight > desired.Height + WorkspaceConstants.SizeVerificationGrowthTolerance;
+            bool widthAccepted = Math.Abs(actualWidth - desired.Width) <= WorkspaceConstants.WindowRectangleTolerance;
+            bool heightAccepted = Math.Abs(actualHeight - desired.Height) <= WorkspaceConstants.WindowRectangleTolerance;
+            if (positionAccepted && widthAccepted && heightAccepted)
+            {
+                _lastVerifiedCellRects[endpoint.CellId] = desired;
+                GetCorrectionState(endpoint.Handle).Reset();
+                return;
+            }
             if (!positionAccepted || (!widthRejected && !heightRejected))
                 return;
 
@@ -651,6 +661,7 @@ namespace NativeEndpointWorkspace
                 return;
 
             _registry.UnbindCell(endpoint.CellId);
+            _runtimeLog.Warn("ENDPOINT_DETACH", RuntimeLogService.EndpointMetadata(endpoint) + " reason=" + reason.Replace(' ', '_'));
             ClearEndpointRuntimeState(endpoint);
             RefreshManagedHandleSnapshot();
 
@@ -709,11 +720,13 @@ namespace NativeEndpointWorkspace
             if (result == GeometrySyncResult.AlreadyCorrect)
             {
                 correctionState.Reset();
-                _lastCommittedCellRects[cellId] = bounds;
+                _lastRequestedCellRects[cellId] = bounds;
+                _lastVerifiedCellRects[cellId] = bounds;
             }
             else if (result == GeometrySyncResult.Applied)
             {
-                _lastCommittedCellRects[cellId] = bounds;
+                // Async native success means the request was submitted. Verification is separate.
+                _lastRequestedCellRects[cellId] = bounds;
                 ScheduleEndpointSizeVerification(endpoint);
             }
             return result;
@@ -742,9 +755,17 @@ namespace NativeEndpointWorkspace
                     Rect desiredRect;
                     if (!forceAllGeometry && TryGetDesiredCellScreenRect(endpoint.CellId, out desiredRect))
                     {
-                        Rect cachedRect;
-                        if (_lastCommittedCellRects.TryGetValue(endpoint.CellId, out cachedRect) && AreScreenRectsEquivalent(cachedRect, desiredRect))
+                        Rect verifiedRect;
+                        if (_lastVerifiedCellRects.TryGetValue(endpoint.CellId, out verifiedRect) && AreScreenRectsEquivalent(verifiedRect, desiredRect))
                             continue;
+
+                        Rect requestedRect;
+                        if (_lastRequestedCellRects.TryGetValue(endpoint.CellId, out requestedRect) && AreScreenRectsEquivalent(requestedRect, desiredRect))
+                        {
+                            // A matching async request is already in flight or awaiting verification.
+                            ScheduleEndpointSizeVerification(endpoint);
+                            continue;
+                        }
                     }
 
                     int nativeErrorCode;
@@ -795,7 +816,7 @@ namespace NativeEndpointWorkspace
             RequestFinalNativeLayoutCommit(showCompletionStatus);
         }
 
-        // rc11 performance path: known WPF events only mark geometry dirty. Interactive
+        // Interactive performance path: known WPF events only mark geometry dirty. Interactive
         // drag/resize updates are coalesced to a bounded cadence; release/restore/resync
         // requests use one final Render-priority commit.
         private void RequestInteractiveGeometrySync(bool showCompletionStatus)
@@ -877,6 +898,8 @@ namespace NativeEndpointWorkspace
             if (!_initialLayoutApplied || _buildingGrid || _workspaceCloseAccepted || WindowState == WindowState.Minimized || _committingNativeLayout)
                 return;
 
+            var stopwatch = Stopwatch.StartNew();
+            NativeLayoutCommitResult result = null;
             _committingNativeLayout = true;
             try
             {
@@ -885,7 +908,7 @@ namespace NativeEndpointWorkspace
                 if (forceAllGeometry)
                     WorkspaceGrid.UpdateLayout();
 
-                NativeLayoutCommitResult result = syncGeometry
+                result = syncGeometry
                     ? SyncAllEndpointGeometry(forceAllGeometry)
                     : new NativeLayoutCommitResult();
 
@@ -897,7 +920,18 @@ namespace NativeEndpointWorkspace
             }
             finally
             {
+                stopwatch.Stop();
                 _committingNativeLayout = false;
+                int endpointCount = _registry.All().Count();
+                string details = "duration_ms=" + stopwatch.ElapsedMilliseconds +
+                                 " endpoints=" + endpointCount +
+                                 " geometry=" + syncGeometry +
+                                 " zorder=" + syncZOrder +
+                                 " final=" + forceAllGeometry +
+                                 (result == null ? string.Empty : " applied=" + result.AppliedGeometryCount + " failures=" + (result.GeometryFailureCount + result.ZOrderFailureCount));
+                _runtimeLog.Debug("LAYOUT_COMMIT", details);
+                if (stopwatch.ElapsedMilliseconds >= WorkspaceConstants.SlowLayoutCommitWarningMilliseconds)
+                    _runtimeLog.Warn("LAYOUT_COMMIT_SLOW", details);
             }
         }
 
@@ -946,7 +980,7 @@ namespace NativeEndpointWorkspace
                     return;
                 }
 
-                // rc10 invariant: do nothing while every healthy endpoint is already above
+                // Z-order invariant: do nothing while every healthy endpoint is already above
                 // the Workspace. If correction is required, move the Workspace exactly once
                 // behind the bottom-most managed endpoint. This avoids the visible flicker
                 // caused by moving the opaque Workspace once per endpoint.
@@ -974,6 +1008,7 @@ namespace NativeEndpointWorkspace
             return _registry.All()
                 .Where(x => x.CellId <= _cellCount &&
                             _windowCoordinator.IsEndpointIdentityCurrent(x, false) &&
+                            _windowCoordinator.IsVisible(x) &&
                             !_windowCoordinator.IsMinimized(x) &&
                             !_windowCoordinator.IsHung(x))
                 .OrderBy(x => x.CellId)
@@ -1007,6 +1042,7 @@ namespace NativeEndpointWorkspace
                 int height = (int)Math.Round(bounds.Height);
                 if (!_windowCoordinator.IsAtRectangle(endpoint, x, y, width, height))
                     return true;
+                _lastVerifiedCellRects[endpoint.CellId] = bounds;
             }
 
             bool workspaceBelowAllEndpoints;
@@ -1106,6 +1142,10 @@ namespace NativeEndpointWorkspace
 
         private void LayoutLockService_WindowDestroyed(IntPtr hwnd)
         {
+            NativeEndpoint tombstoned = _registry.MarkDestroyed(hwnd);
+            if (tombstoned != null)
+                _runtimeLog.Info("ENDPOINT_DESTROY", RuntimeLogService.EndpointMetadata(tombstoned));
+
             Dispatcher.BeginInvoke(new Action(delegate
             {
                 if (_workspaceCloseAccepted)
@@ -1282,17 +1322,27 @@ namespace NativeEndpointWorkspace
 
         private string ApplyActiveShortcutBindings()
         {
+            string summary;
+            TryApplyActiveShortcutBindings(out summary);
+            return summary;
+        }
+
+        private bool TryApplyActiveShortcutBindings(out string summary)
+        {
             if (_shortcutService == null || _shortcutBindings == null)
-                return "Shortcuts are not initialized.";
+            {
+                summary = "Shortcuts are not initialized.";
+                return false;
+            }
 
             IList<ShortcutBinding> active = _shortcutBindings.Where(x => x.CellId >= 1 && x.CellId <= _cellCount)
                                                               .OrderBy(x => x.CellId)
                                                               .ToList();
-            string summary;
-            _shortcutService.ApplyBindings(active, out summary);
+            bool applied = _shortcutService.ApplyBindings(active, out summary);
             foreach (ShortcutBinding inactive in _shortcutBindings.Where(x => x.CellId > _cellCount))
                 inactive.Status = "Inactive (Cell disabled)";
-            return summary;
+            _runtimeLog.Info(applied ? "SHORTCUT_APPLY" : "SHORTCUT_APPLY_ROLLBACK", "cells=" + _cellCount + " success=" + applied);
+            return applied;
         }
 
         private GridLayoutState CaptureGridLayoutState()
@@ -1347,16 +1397,19 @@ namespace NativeEndpointWorkspace
                 var state = new WorkspaceState
                 {
                     Version = WorkspaceConstants.Version,
+                    LayoutSchemaVersion = WorkspaceConstants.LayoutSchemaVersion,
                     CellCount = _cellCount,
                     Grid = CaptureGridLayoutState(),
                     Cells = new List<CellLayoutState>(),
                     Shortcuts = _shortcutBindings.Select(x => x.Clone()).OrderBy(x => x.CellId).ToList()
                 };
                 _layoutService.Save(dialog.FileName, state);
+                _runtimeLog.Info("LAYOUT_SAVE", "schema=" + WorkspaceConstants.LayoutSchemaVersion + " cells=" + _cellCount);
                 StatusText.Text = "Adaptive tiled layout saved with " + _cellCount + " Cells. HWND bindings are runtime-only and were not persisted.";
             }
             catch (Exception ex)
             {
+                _runtimeLog.Error("LAYOUT_SAVE_FAILED", ex);
                 MessageBox.Show(this, ex.Message, "Save Layout Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1385,7 +1438,7 @@ namespace NativeEndpointWorkspace
 
                 // Review #6: validate the complete proposed state before mutating the active
                 // Workspace. Malformed geometry/shortcuts cannot destroy the working layout.
-                ValidateLoadedWorkspaceState(state, proposedCellCount, proposedShortcuts);
+                WorkspaceStateValidator.Validate(state, proposedCellCount, proposedShortcuts);
 
                 foreach (NativeEndpoint endpoint in oldEndpoints)
                     ClearEndpointRuntimeState(endpoint);
@@ -1409,7 +1462,10 @@ namespace NativeEndpointWorkspace
                 BuildAdaptiveLayout(state == null ? null : state.Grid);
 
                 _shortcutBindings = proposedShortcuts;
-                string shortcutSummary = ApplyActiveShortcutBindings();
+                string shortcutSummary;
+                if (!TryApplyActiveShortcutBindings(out shortcutSummary))
+                    throw new InvalidDataException("Global shortcut registration failed; shortcut transaction rolled back. " + shortcutSummary);
+                _runtimeLog.Info("LAYOUT_LOAD", "schema=" + state.LayoutSchemaVersion + " cells=" + _cellCount);
                 StatusText.Text = "Layout loaded transactionally with " + _cellCount +
                                   " adaptive tiled Cells; endpoint HWNDs intentionally not restored. " + shortcutSummary;
             }
@@ -1423,6 +1479,7 @@ namespace NativeEndpointWorkspace
                 {
                     // Preserve the original load exception for the user; rollback is best effort.
                 }
+                _runtimeLog.Error("LAYOUT_LOAD_FAILED", ex);
                 MessageBox.Show(this, ex.Message, "Load Layout Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1462,86 +1519,6 @@ namespace NativeEndpointWorkspace
             _shortcutBindings = shortcuts.Select(x => x.Clone()).ToList();
             ApplyActiveShortcutBindings();
             RequestFinalNativeLayoutCommit(false);
-        }
-
-        private static void ValidateLoadedWorkspaceState(WorkspaceState state, int proposedCellCount, IList<ShortcutBinding> proposedShortcuts)
-        {
-            if (state == null)
-                throw new InvalidDataException("Layout file did not contain a WorkspaceState.");
-            if (!string.IsNullOrWhiteSpace(state.Version) && !state.Version.StartsWith(WorkspaceConstants.LayoutVersionCompatibilityPrefix, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("Layout version is not compatible with the v0.0.1 RC line.");
-            if (state.CellCount != 0 && (state.CellCount < WorkspaceConstants.MinimumCellCount || state.CellCount > WorkspaceConstants.MaximumCellCount))
-                throw new InvalidDataException("Layout CellCount is outside the supported 4-12 range.");
-            if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < WorkspaceConstants.MinimumCellCount || state.Cells.Count > WorkspaceConstants.MaximumCellCount))
-                throw new InvalidDataException("Legacy layout does not provide a valid 4-12 Cell count.");
-            if (proposedCellCount < WorkspaceConstants.MinimumCellCount || proposedCellCount > WorkspaceConstants.MaximumCellCount)
-                throw new InvalidDataException("Resolved layout CellCount is outside the supported 4-12 range.");
-
-            ValidateGridLayoutState(state.Grid, proposedCellCount);
-
-            if (proposedShortcuts == null || proposedShortcuts.Count < proposedCellCount)
-                throw new InvalidDataException("Layout shortcut configuration is incomplete.");
-
-            foreach (ShortcutBinding binding in proposedShortcuts)
-            {
-                if (binding.CellId < 1 || binding.CellId > WorkspaceConstants.MaximumCellCount)
-                    throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
-                if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
-                    binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
-                    throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F12 range.");
-                if (binding.Win)
-                    throw new InvalidDataException("Layout contains a Win-key global shortcut, which is not supported by the rc11 shortcut policy.");
-                if (!binding.HasSupportedModifier)
-                    throw new InvalidDataException("Layout contains a bare global function-key shortcut. Ctrl, Alt, or Shift is required.");
-            }
-
-            string duplicate = proposedShortcuts.Where(x => x.CellId <= proposedCellCount)
-                .GroupBy(x => x.ConflictKey)
-                .Where(g => g.Count() > 1)
-                .Select(g => g.Key)
-                .FirstOrDefault();
-            if (!string.IsNullOrEmpty(duplicate))
-                throw new InvalidDataException("Layout contains duplicate active shortcut gestures: " + duplicate + ".");
-        }
-
-        private static void ValidateGridLayoutState(GridLayoutState grid, int cellCount)
-        {
-            if (grid == null)
-                return;
-
-            int[] rowCounts = GetRowCellCounts(cellCount);
-            if (grid.RowLayouts != null && grid.RowLayouts.Count > 0)
-            {
-                if (grid.RowLayouts.Count != rowCounts.Length)
-                    throw new InvalidDataException("Layout row count is incompatible with CellCount.");
-
-                int expectedCellId = 1;
-                for (int row = 0; row < rowCounts.Length; row++)
-                {
-                    AdaptiveRowLayoutState rowState = grid.RowLayouts[row];
-                    if (rowState == null || rowState.CellIds == null || rowState.ColumnWeights == null ||
-                        rowState.CellIds.Count != rowCounts[row] || rowState.ColumnWeights.Count != rowCounts[row])
-                        throw new InvalidDataException("Layout row geometry is incomplete or incompatible.");
-                    ValidateFinitePositiveWeight(rowState.HeightWeight, "row height");
-                    for (int column = 0; column < rowCounts[row]; column++)
-                    {
-                        if (rowState.CellIds[column] != expectedCellId++)
-                            throw new InvalidDataException("Layout Cell ordering is invalid.");
-                        ValidateFinitePositiveWeight(rowState.ColumnWeights[column], "column width");
-                    }
-                }
-            }
-
-            if (grid.RowWeights != null)
-                foreach (double weight in grid.RowWeights) ValidateFinitePositiveWeight(weight, "legacy row weight");
-            if (grid.ColumnWeights != null)
-                foreach (double weight in grid.ColumnWeights) ValidateFinitePositiveWeight(weight, "legacy column weight");
-        }
-
-        private static void ValidateFinitePositiveWeight(double value, string name)
-        {
-            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0 || value > WorkspaceConstants.MaximumLayoutWeight)
-                throw new InvalidDataException("Layout contains an invalid " + name + ".");
         }
 
         private static int ResolveLoadedCellCount(WorkspaceState state)
@@ -1680,46 +1657,16 @@ namespace NativeEndpointWorkspace
             if (_workspaceCloseAccepted)
                 return;
 
-            NativeEndpoint[] allEndpoints = _registry.All().ToArray();
-            if (allEndpoints.Length == 0)
-            {
-                _workspaceCloseAccepted = true;
-                return;
-            }
-
-            NativeEndpoint[] closableEndpoints = allEndpoints
-                .Where(x => _windowCoordinator.IsEndpointIdentityCurrent(x, true))
-                .ToArray();
-            int skippedEndpointCount = allEndpoints.Length - closableEndpoints.Length;
-
-            string closeMessage =
-                "Close Native Endpoint Workspace?\n\n" +
-                closableEndpoints.Length + " bound application window(s) passed identity validation and will receive a graceful WM_CLOSE request.";
-            if (skippedEndpointCount > 0)
-                closeMessage += "\n\n" + skippedEndpointCount + " stale/unverifiable endpoint(s) will be left open for safety.";
-            closeMessage += "\n\nApplications with unsaved data may show their own Save/Cancel prompt.";
-
-            MessageBoxResult result = MessageBox.Show(this,
-                closeMessage,
-                "Close Workspace and Bound Apps",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (result != MessageBoxResult.Yes)
-            {
-                e.Cancel = true;
-                return;
-            }
-
             _workspaceCloseAccepted = true;
+            NativeEndpoint[] endpoints = _registry.All().ToArray();
+            _runtimeLog.Info("WORKSPACE_CLOSE", "detach_only=1 bound_endpoints=" + endpoints.Length);
+
+            // Workspace lifetime never owns external application lifetime. Closing the
+            // Workspace stops management and leaves every bound application open.
             _windowHealthTimer.Stop();
             _interactiveCommitTimer.Stop();
             StopAllSizeVerificationTimers();
             _layoutLockService.Dispose();
-
-            foreach (NativeEndpoint endpoint in closableEndpoints)
-                _windowCoordinator.RequestClose(endpoint);
-
             _registry.Clear();
             RefreshManagedHandleSnapshot();
         }

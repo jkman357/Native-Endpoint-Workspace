@@ -1,66 +1,49 @@
 # Native Endpoint Workspace
 
-**Version:** v0.0.1rc11  
-**Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2
+**Current version:** v0.0.1rc12  
+**Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
+**Status:** Technical POC / hardening line
 
-Native Endpoint Workspace is a Windows technical POC for arranging and managing independent native top-level application windows as adaptive tiled **Native Endpoints** without embedding or reparenting them.
+Native Endpoint Workspace is a Windows workspace for arranging independent native top-level application windows as adaptive tiled **Native Endpoints**. External applications stay normal top-level windows; the Workspace manages their screen geometry, Cell membership, layout lock, group visibility, and Z-order without embedding or reparenting.
 
-Firefox, Windows Explorer, Notepad++, VS Code, Terminal and similar applications remain normal top-level windows. The Workspace manages their screen geometry, layout membership, group visibility/Z-order, and bound-window lifecycle policy.
+Typical endpoints include Firefox top-level windows, Windows Explorer, Notepad++, VS Code, Terminal/Command Prompt, Calculator, Paint, and other normal desktop applications.
 
+For release history, see [`CHANGELOG.md`](CHANGELOG.md).
 
-## rc11 focus — Interactive Layout Performance + UI Cleanup
+## Core architecture
 
-rc11 preserves the rc10 Z-order stability fix and concentrates on responsiveness and routine-use UI cleanup.
+```text
+WPF Workspace
+    |
+    +-- Adaptive tiled Cell layout (4-12 Cells, default 8)
+    |       +-- independent row/Cell proportions
+    |       +-- GridSplitter redistribution
+    |       +-- endpoint minimum-size accommodation
+    |
+    +-- EndpointRegistry
+    |       +-- runtime-only HWND/PID/TID/process metadata
+    |       +-- destroy-observed tombstone on the bound instance
+    |
+    +-- Native Layout Commit
+    |       +-- ~45 ms interactive coalescing
+    |       +-- final precise commit after resize/splitter operations
+    |       +-- requested vs verified geometry state
+    |
+    +-- Endpoint Layout Lock
+    |       +-- out-of-context WinEvent observation
+    |       +-- early managed-HWND filtering
+    |       +-- bounded correction/backoff
+    |
+    +-- NativeWindowCoordinator
+            +-- identity validation
+            +-- asynchronous external geometry requests
+            +-- single-anchor endpoint-group Z-order
+            +-- no-activation group minimize/restore
+```
 
-- replace the previous every-layout-pass synchronization path with a bounded interactive commit scheduler
-- coalesce Workspace move/resize and splitter drag updates to approximately 45 ms while interaction is active
-- issue one precise Render-priority final commit when resize/splitter interaction completes
-- separate geometry-dirty and Z-order-dirty work so geometry changes do not automatically re-enumerate/re-stack the endpoint group
-- cache the last committed Cell screen rectangles and skip endpoint geometry work when the desired Cell rectangle did not change
-- keep explicit Resync as an Advanced recovery action rather than a normal toolbar command
-- rename per-Cell `Unbind` to `Detach` and remove the duplicate per-Cell Close button; applications normally close through their own native X button
-- combine Minimize Group / Restore Group into one stateful toolbar control
-- use compact icon-oriented toolbar controls with tooltips for Identify, group minimize/restore, reset, save, load, and settings
-- add Workspace-local `Ctrl+S` / `Ctrl+O` shortcuts for Save Layout / Load Layout
-- restrict global endpoint assignment modifiers to Ctrl / Alt / Shift combinations; bare F1-F12 and Win-key global shortcuts are rejected
+## Non-embedding boundary
 
-### rc11 performance regression test
-
-1. Bind 4-8 mixed endpoints (for example Firefox, Explorer, Notepad++, Command Prompt, Calculator, Paint).
-2. Continuously resize and move the Workspace; endpoints should follow without the UI feeling significantly sticky.
-3. Drag Cell splitters continuously; native endpoint updates should remain responsive and settle precisely when the mouse is released.
-4. Repeatedly click among bound applications; stable geometry changes must not cause unnecessary Z-order re-stacking or flicker.
-5. Use `Detach` and verify the application remains open and becomes independent from Workspace layout lock.
-6. Verify the application native X closes it and the Cell clears automatically through endpoint-destroy/stale handling.
-7. Verify global shortcut settings require Ctrl, Alt, and/or Shift, detect collisions, and reject bare F-keys / Win-key combinations.
-
-## rc10 focus — Z-order Stability / Flicker Regression Fix
-
-rc10 is a narrow runtime-stability RC based on mixed-application testing with Firefox, Paint, Explorer, Command Prompt, and other native endpoints. It does not add new product features.
-
-- preserve rc09 review-hardening behavior and endpoint identity validation
-- replace per-endpoint Workspace Z-order moves with a single bottom-most endpoint anchor
-- inspect the current top-level Z-order before changing it
-- perform no Z-order native call when all healthy managed endpoints are already above the Workspace
-- make the periodic health path detection-only while geometry and Z-order are healthy
-- invoke a native layout correction only after an actual geometry or Z-order invariant violation is detected
-- retain rectangle equality checks so stable endpoint geometry does not generate repeated `SetWindowPos` calls
-- keep the non-embedding architecture and no-activation focus policy
-
-### rc10 regression test
-
-1. Bind Paint to Cell 1 and Firefox to Cell 2; leave the Workspace idle and verify neither endpoint periodically flickers.
-2. Bind Explorer to another Cell and verify adding/using Explorer does not make Paint or Firefox blink behind the Workspace.
-3. Click repeatedly among Paint, Firefox, Explorer, Command Prompt, and other bound endpoints; all other bound endpoints must remain visible.
-4. Resize, move, maximize, and restore the Workspace and drag splitters; endpoints must resync without requiring `Ctrl+Shift+Fx`.
-5. Leave the Workspace idle for several health-timer intervals; stable geometry/Z-order must not trigger visible re-stacking.
-6. Detach an endpoint and confirm it returns to normal desktop behavior while the remaining endpoint group stays stable.
-
-## Security / privacy boundary
-
-Native Endpoint Workspace does **not** store, persist, collect, or manage user account credentials or passwords. Browser/application login state remains owned by each external application or browser profile. Runtime HWND values and endpoint process identity are not persisted in layout files.
-
-The implementation deliberately does **not** use:
+The application deliberately does **not** use:
 
 - `SetParent`
 - owner mutation
@@ -72,183 +55,205 @@ The implementation deliberately does **not** use:
 - `WriteProcessMemory`
 - `TerminateProcess`
 
-## rc09 focus — Static Review Cleanup (#8 / #9 / #11 / #12)
-
-rc09 is an engineering-cleanup RC. It preserves the rc08 foreground-group, size-accommodation, transactional-load, and native-result behavior while closing the remaining low/medium static-review cleanup tranche before the next full review.
-
-### Review #8 — layout commit semantic clarity
-
-The old `authoritativeFinal` concept is no longer used. Queue callers now explicitly request only whether completion status should be surfaced; correctness is identical for every Native Layout Commit. Coalesced requests preserve a pending completion-status request rather than silently discarding it.
-
-### Review #9 — centralized behavior constants
-
-Application-specific tuning values and shortcut/version constants are centralized in `WorkspaceConstants`, including supported Cell limits, F-key range, hotkey ID base, layout minimums, correction/backoff timing, endpoint-health timing, Identify duration, and native text-buffer capacities. Named Win32 constants remain in `NativeMethods`.
-
-### Review #11 — fail-fast Cell topology
-
-`GetRowCellCounts()` now explicitly handles Cell counts 4 through 12 and throws `ArgumentOutOfRangeException` for unsupported values. It no longer silently converts an unexpected value into a 12-Cell topology.
-
-### Review #12 — bare global F-key protection
-
-Shortcut registration now requires at least one modifier (`Ctrl`, `Shift`, `Alt`, or `Win`). Bare global `F1` through `F12` registrations are rejected so the Workspace cannot silently intercept common application commands such as Help, Rename, Refresh, Full Screen, or developer shortcuts. Layout-file validation enforces the same rule transactionally.
-
-## Adaptive tiled layout
-
-- 4 through 12 Cells; default 8.
-- Workspace owns a fixed total area.
-- Cells cannot float outside the Workspace.
-- Splitters redistribute the existing area: when one region grows, adjacent regions shrink.
-- Each row has independent horizontal Cell proportions.
-- Row heights can be redistributed independently.
-- Save/Load persists row heights and per-row Cell width proportions.
-- `Reset Cell Layout` restores equal proportions without dropping bindings.
-
-Default 8-Cell topology:
-
-```text
-+--------+--------+--------+--------+
-| Cell 1 | Cell 2 | Cell 3 | Cell 4 |
-+--------+--------+--------+--------+
-| Cell 5 | Cell 6 | Cell 7 | Cell 8 |
-+--------+--------+--------+--------+
-```
+External apps remain independent native top-level windows.
 
 ## Binding workflow
 
 1. Start Native Endpoint Workspace.
-2. Bring a target top-level application window to the foreground.
+2. Bring the target application window to the foreground.
 3. Press `Ctrl+Shift+F1` for Cell 1, `Ctrl+Shift+F2` for Cell 2, and so on.
-4. The foreground endpoint identity is captured and the window is placed over that Cell's content rectangle.
-5. Repeat for separate Firefox top-level windows, Explorer, Notepad++, VS Code, Terminal, etc.
-6. Move/resize/maximize/restore the Workspace or drag Cell splitters; the current WPF Cell geometry is reapplied to bound endpoints.
+4. The foreground top-level window is bound to that Cell and follows its screen rectangle.
+5. Move/resize/maximize/restore the Workspace or drag Cell splitters; bound endpoints are resynchronized automatically.
 
-Firefox tabs are not Native Endpoints. Multiple Firefox endpoints require separate Firefox top-level windows.
+Firefox tabs are not endpoints. Use separate Firefox top-level windows for separate Cells.
 
-## Native Layout Commit
+## Cell and lifecycle semantics
+
+- **Detach:** releases the endpoint from its Cell and Layout Lock; the application remains open.
+- **Application X:** close the application using its own native window controls. Destroy/stale handling clears the Cell automatically.
+- **Reduce Cell count:** endpoints in removed Cells are detached; applications remain open.
+- **Load Layout:** runtime endpoint handles are not restored from disk.
+- **Close Workspace:** all bindings are detached/stopped and **external applications remain open**. The Workspace does not send `WM_CLOSE` to external applications.
+
+The detach-only Workspace shutdown policy avoids treating a raw HWND as an infallible destructive-operation identity.
+
+## Endpoint identity hardening
+
+Runtime identity captures:
+
+- HWND
+- process ID
+- thread ID
+- process start time when available
+- window class
+- per-binding runtime instance ID
+
+A strong identity check is fail-closed when bind-time/current process start time cannot be verified. An observed `EVENT_OBJECT_DESTROY` tombstones the currently bound endpoint instance before UI-thread cleanup, so that instance can no longer validate as current even if the numeric HWND value is later reused.
+
+Runtime HWND/PID/TID data is never persisted to layout files.
+
+## Adaptive layout
+
+- 4 through 12 Cells; default 8.
+- Workspace owns a fixed total layout area.
+- Splitters redistribute area instead of allowing Cells to float outside the Workspace.
+- Each row can have independent horizontal proportions.
+- Row heights can be redistributed.
+- Applications that reject an undersized rectangle can cause their Cell/row allocation to grow; the Workspace may grow within the monitor work area.
+- `Reset Cell Layout` restores equal proportions without dropping bindings.
+
+## Shortcut policy
+
+Default endpoint assignment:
 
 ```text
-WPF LayoutUpdated / SizeChanged / LocationChanged
-Splitter drag / maximize / restore / explicit Resync
-        |
-        v
-geometry fingerprint changed?
-        | yes
-        v
-coalesced Render-priority commit
-        |
-        v
-WorkspaceGrid.UpdateLayout()
-        |
-        v
-validate endpoint runtime identity
-        |
-        v
-apply Cell screen rectangles asynchronously
-        |
-        v
-verify endpoint minimum-size acceptance
-        |
-        v
-anchor Workspace beneath every healthy endpoint
+Ctrl+Shift+F1 ... Ctrl+Shift+F12
 ```
 
-`Resync Endpoints` invokes the same path manually. It does not rebind, restart, or reload applications.
+Shortcut Settings supports Ctrl / Alt / Shift combinations. At least one supported modifier is required. Bare F1-F12 and Win-key global combinations are rejected.
 
-## Layout Lock
+Global shortcut registration is transactional: if Windows rejects any requested hotkey, the partially registered new set is removed and the previous working set is restored.
 
-A bound endpoint is expected to occupy its Cell rectangle. If a managed application is manually moved or resized, an out-of-context WinEvent location hook requests correction back to the Cell.
+Workspace-local shortcuts:
 
-The hook is observation-only and uses `WINEVENT_OUTOFCONTEXT`; no code is injected into target applications.
+```text
+Ctrl+S  Save Layout
+Ctrl+O  Load Layout
+```
 
-If an endpoint repeatedly refuses the requested geometry, bounded retry/backoff temporarily suspends Layout Lock for that endpoint instead of fighting indefinitely.
-
-## Lifecycle semantics
-
-- **Detach:** stop managing the endpoint; application remains open.
-- **Application X:** close the application through its own native window controls; endpoint-destroy/stale handling clears the Cell automatically.
-- **Reduce Cell count:** endpoints in removed Cells are detached only; applications remain open.
-- **Load Layout:** proposed state is validated before mutation; a successful load releases current runtime bindings while applications remain open; failed commit attempts roll back the previous working state.
-- **Close Workspace:** after confirmation, still-bound endpoints that pass critical identity revalidation receive graceful `WM_CLOSE`; stale/unverifiable endpoints are deliberately left open.
-
-`WM_CLOSE` is preferred over process termination so applications retain their normal unsaved-data handling.
-
-## Save / Load
+## Save / Load and schema version
 
 Layout files persist:
 
+- `LayoutSchemaVersion`
+- application version for provenance
 - Cell count
 - adaptive row heights
-- each row's independent Cell-width proportions
+- per-row Cell-width proportions
 - shortcut mappings
 
-Runtime HWND/PID/TID/process-start identity is intentionally **not** persisted.
+`LayoutSchemaVersion` is independent from the application RC version. rc12 writes schema version `1`. Legacy rc01-rc11 files without the schema field are accepted only when their application version exactly matches the `0.0.1` / `0.0.1rcN` line.
 
-## Architecture
+Load validates structure before mutating the active Workspace. OS-level global hotkey registration is also included in the transaction; a partial registration failure restores the previous shortcut set and causes the load to fail/roll back.
+
+## DPI baseline
+
+rc12 explicitly opts the .NET Framework 4.7.2 WPF process into **Per-Monitor DPI awareness** using `app.manifest` (`true/pm` / `PerMonitor`) and enables WPF DPI-change handling through `App.config`.
+
+`WM_DPICHANGED` schedules a final endpoint geometry commit after the WPF layout transition.
+
+Required mixed-DPI regression cases before claiming multi-monitor hardening:
+
+- 100% -> 150%
+- 150% -> 100%
+- 125% -> 200%
+- maximize/restore on a secondary monitor
+- move the Workspace between different-DPI monitors
+- monitor resolution/DPI change or hot-plug
+- endpoints with different DPI-awareness modes
+
+## Runtime diagnostics
+
+Runtime diagnostics are written under:
 
 ```text
-WPF Workspace
-    |
-    +-- Adaptive tiled layout
-    |       +-- GridSplitter redistribution
-    |       +-- actual Cell screen rectangles
-    |
-    +-- EndpointRegistry
-    |       +-- Cell ID <-> runtime NativeEndpoint identity
-    |
-    +-- Native Layout Commit
-    |       +-- WPF geometry fingerprint
-    |       +-- Render-priority coalesced commit
-    |
-    +-- Endpoint Layout Lock
-    |       +-- managed-HWND callback filtering
-    |       +-- location / foreground / destroy observation
-    |       +-- bounded correction retry/backoff
-    |
-    +-- NativeWindowCoordinator
-            +-- identity validation
-            +-- async external geometry requests
-            +-- no-activation group minimize/restore
-            +-- critical WM_CLOSE revalidation
-            +-- Workspace-below-all-endpoints Z-order anchoring
-            +-- monitor work-area query for size accommodation
+logs\NativeEndpointWorkspace.log
 ```
+
+Default level is `INFO`. To enable additional layout-commit diagnostics for a test session:
+
+```bat
+set NATIVE_ENDPOINT_WORKSPACE_LOG_LEVEL=DEBUG
+run.cmd
+```
+
+Log policy:
+
+- maximum active file size: 5 MB
+- retention: 5 log files total (active + rotated backups)
+- rotation is automatic
+- logging failure must not stop the Workspace
+
+Examples of recorded events:
+
+- Workspace session start/exit
+- endpoint bind/detach/destroy
+- Cell ID, HWND, PID/TID, process name
+- shortcut apply/rollback
+- save/load success/failure
+- DPI change
+- slow Native Layout Commit warnings
+- optional DEBUG layout commit duration/counts
+
+The runtime log deliberately does **not** record:
+
+- webpage contents
+- typed user input
+- clipboard contents
+- passwords/credentials
+- browser cookies/session data
+- full endpoint window titles
+- full Explorer paths or document names derived from window titles
+
+## Security and privacy
+
+Native Endpoint Workspace does **not** store, persist, collect, or manage user account credentials or passwords. Browser/application login credentials and session state remain owned by the browser or external application profile and are outside this application's storage.
+
+Layout files contain Workspace geometry and shortcut configuration only; runtime native window identity is not persisted.
 
 ## Build
 
-From a Windows machine with the .NET Framework 4.7.2 developer targeting pack/MSBuild available:
+Requirements:
+
+- Windows 10
+- Visual Studio/MSBuild with the .NET Framework 4.7.2 Developer/Targeting Pack
+
+From the repository root:
 
 ```bat
-cd Native-Endpoint-Workspace
 build.cmd
 ```
 
-Run:
+## Test
+
+rc12 adds a dependency-free .NET Framework test executable for extracted pure policy/state logic:
+
+```bat
+test.cmd
+```
+
+Initial automated characterization covers:
+
+- strong endpoint identity fail-closed behavior
+- exact legacy layout-version boundary behavior
+- Cell topology fail-fast behavior
+- destroy tombstone behavior
+- global-hotkey transaction rollback
+- unsupported layout schema rejection
+
+Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry) still requires real Windows runtime regression testing.
+
+## Run
 
 ```bat
 run.cmd
 ```
 
-The POC starts on .NET Framework 4.7.2 for compatibility with the initial test machine. Native/Services boundaries remain separated so a later migration to modern .NET/WPF does not require changing the Native Endpoint concept.
+## rc12 regression focus
 
-## rc09 regression / review-closure test
+1. Bind 4-8 mixed apps and repeat Workspace move/resize/maximize/restore and splitter drag.
+2. Confirm `Detach` leaves the external app open and independent.
+3. Close the Workspace with bound apps; confirm every external app remains open.
+4. Force a shortcut conflict during Settings/Load and confirm the previous shortcut set still works afterward.
+5. Move the Workspace between monitors with different Windows scaling values and compare Cell/endpoint pixel bounds.
+6. Close/recreate an endpoint and confirm the destroyed binding does not resume management of a replacement window.
+7. Inspect `logs\NativeEndpointWorkspace.log`; verify no endpoint titles, paths, typed text, credentials, or browser content are present.
+8. Run `test.cmd` and confirm all policy tests PASS.
 
-1. Build and run on the Windows 10 / .NET Framework 4.7.2 test machine.
-2. Re-run rc08 mixed-endpoint tests: Firefox, Notepad++, console/Terminal, and Calculator.
-3. Resize/maximize/restore the Workspace and drag splitters; bound endpoints must preserve rc08 geometry/Z-order behavior.
-4. In Shortcut Settings, clear all modifiers for an F-key and apply. Verify the shortcut is rejected and not registered globally.
-5. Verify modified F-key shortcuts still register and bind the correct foreground endpoint.
-6. Load a layout containing a bare F-key shortcut and verify transactional validation rejects it without destroying the current working state.
-7. Exercise Cell counts 4 through 12 and verify each supported topology builds correctly.
-8. Confirm unsupported Cell counts fail validation rather than silently becoming a 12-Cell layout.
-9. Save a layout and verify the serialized version is `0.0.1rc09`; runtime HWND identity remains non-persistent.
-10. Run a new full static Code Review and classify all original 12 findings as CLOSED, ACCEPTED RISK, or DEFERRED based on rc09 source.
+## Disclaimer
 
-## Current maturity
-
-**POC / hardening stage.** rc10 preserves the rc09 static-review cleanup and applies a narrow Z-order stability correction after mixed-endpoint runtime testing exposed visible flicker. A fresh full review is still required before declaring the original 12 findings closed as a set; rc10 does not claim production readiness by itself.
+This repository is an engineering POC and is not a production-grade desktop window manager. Native top-level window orchestration depends on application and Windows behavior outside the Workspace process. Validate important workflows on the actual target environment before relying on it for long-running work.
 
 ## License
 
-MIT License. See `LICENSE`.
-
-Copyright © 2026.
+MIT License. See [`LICENSE`](LICENSE).
