@@ -2,6 +2,17 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
 
+## v0.0.1rc13 — Build & Test Diagnostics Hardening
+
+- added automatic detailed MSBuild logging to `logs\build.log` for every `build.cmd` invocation
+- kept console build output concise while recording diagnostic verbosity in the file log
+- ensured a build log is still created when MSBuild cannot be located
+- added explicit build exit-code reporting and log-path output on PASS/FAIL
+- added automatic `logs\test.log` output for `test.cmd`
+- made `test.cmd` preserve build diagnostics and stop cleanly when the build stage fails
+- documented build/test log locations and failure-reporting workflow in README
+- advanced application/runtime/source baseline to v0.0.1rc13 without changing the rc12 endpoint-management architecture
+
 ## v0.0.1rc12 — Safety, Schema, Diagnostics & Testability Hardening
 
 - changed Workspace shutdown to detach-only; external applications remain open and the Workspace no longer sends `WM_CLOSE`

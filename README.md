@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc12  
+**Current version:** v0.0.1rc13  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Technical POC / hardening line
 
@@ -214,13 +214,29 @@ From the repository root:
 build.cmd
 ```
 
+`build.cmd` keeps console output concise and always writes detailed MSBuild diagnostics to:
+
+```text
+logs\build.log
+```
+
+If MSBuild cannot be found, the same log file is still created with the launch failure reason. Attach `logs\build.log` when reporting a build failure.
+
 ## Test
 
-rc12 adds a dependency-free .NET Framework test executable for extracted pure policy/state logic:
+The repository includes a dependency-free .NET Framework test executable for extracted pure policy/state logic:
 
 ```bat
 test.cmd
 ```
+
+`test.cmd` first runs the normal build, then records policy-test output in:
+
+```text
+logs\test.log
+```
+
+If the build stage fails, the test run stops and `logs\test.log` points to `logs\build.log`.
 
 Initial automated characterization covers:
 
@@ -239,7 +255,7 @@ Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry) still 
 run.cmd
 ```
 
-## rc12 regression focus
+## rc13 regression focus
 
 1. Bind 4-8 mixed apps and repeat Workspace move/resize/maximize/restore and splitter drag.
 2. Confirm `Detach` leaves the external app open and independent.
@@ -249,6 +265,8 @@ run.cmd
 6. Close/recreate an endpoint and confirm the destroyed binding does not resume management of a replacement window.
 7. Inspect `logs\NativeEndpointWorkspace.log`; verify no endpoint titles, paths, typed text, credentials, or browser content are present.
 8. Run `test.cmd` and confirm all policy tests PASS.
+9. Force or inspect any build failure and confirm `logs\build.log` contains detailed MSBuild diagnostics.
+10. Confirm `test.cmd` creates `logs\test.log` and preserves `logs\build.log` for build failures.
 
 ## Disclaimer
 

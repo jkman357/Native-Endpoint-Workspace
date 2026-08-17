@@ -9,7 +9,7 @@ using System.Windows;
 [assembly: AssemblyCopyright("Copyright © 2026")]
 [assembly: ComVisible(false)]
 [assembly: ThemeInfo(ResourceDictionaryLocation.None, ResourceDictionaryLocation.SourceAssembly)]
-[assembly: AssemblyVersion("0.0.1.12")]
-[assembly: AssemblyFileVersion("0.0.1.12")]
+[assembly: AssemblyVersion("0.0.1.13")]
+[assembly: AssemblyFileVersion("0.0.1.13")]
 
-[assembly: AssemblyInformationalVersion("0.0.1rc12")]
+[assembly: AssemblyInformationalVersion("0.0.1rc13")]
