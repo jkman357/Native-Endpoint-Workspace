@@ -1,7 +1,7 @@
 <Window x:Class="NativeEndpointWorkspace.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Native Endpoint Workspace v0.0.1rc06"
+        Title="Native Endpoint Workspace v0.0.1rc07"
         Width="1500" Height="900" MinWidth="900" MinHeight="600"
         WindowStartupLocation="CenterScreen" Background="#171B21">
     <DockPanel>
@@ -22,7 +22,7 @@
                     <ComboBox x:Name="CellCountComboBox" Width="58" Margin="2" VerticalContentAlignment="Center"
                               SelectionChanged="CellCountComboBox_SelectionChanged"/>
                 </StackPanel>
-                <TextBlock Text="Adaptive tiled native top-level windows • deterministic native layout commit • no embedding" Foreground="#AAB4C3"
+                <TextBlock Text="Adaptive tiled native endpoints • identity-hardened layout lock • no embedding" Foreground="#AAB4C3"
                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,6,0"/>
             </DockPanel>
         </Border>

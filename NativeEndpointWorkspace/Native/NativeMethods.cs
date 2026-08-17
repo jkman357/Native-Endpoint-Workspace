@@ -22,6 +22,7 @@ namespace NativeEndpointWorkspace.Native
         internal const uint SWP_NOMOVE = 0x0002;
         internal const uint SWP_NOZORDER = 0x0004;
         internal const uint SWP_NOACTIVATE = 0x0010;
+        internal const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
         internal static readonly IntPtr HWND_TOP = IntPtr.Zero;
 
@@ -29,6 +30,7 @@ namespace NativeEndpointWorkspace.Native
         internal const int SW_RESTORE = 9;
 
         internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+        internal const uint EVENT_OBJECT_DESTROY = 0x8001;
         internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
         internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
         internal const int OBJID_WINDOW = 0;
@@ -56,7 +58,11 @@ namespace NativeEndpointWorkspace.Native
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        internal static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool IsHungAppWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -76,6 +82,9 @@ namespace NativeEndpointWorkspace.Native
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         internal static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
