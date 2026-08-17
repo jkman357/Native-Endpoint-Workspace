@@ -28,7 +28,6 @@ namespace NativeEndpointWorkspace
         private static void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
             RuntimeLogService.Shared.Error("UNHANDLED_DISPATCHER_EXCEPTION", e.Exception);
-            // Do not hide the exception; normal WPF failure behavior remains intact.
         }
 
         private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)

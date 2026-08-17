@@ -111,8 +111,6 @@ namespace NativeEndpointWorkspace.Services
                 return;
             }
 
-            // Object hooks are system-wide. Reject non-window/non-self events before touching
-            // the managed-handle lock so unrelated high-frequency WinEvents stay cheap.
             if (idObject != NativeMethods.OBJID_WINDOW || idChild != NativeMethods.CHILDID_SELF)
                 return;
 

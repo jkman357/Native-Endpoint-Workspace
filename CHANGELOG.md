@@ -1,6 +1,20 @@
 # Changelog
 
-All notable changes to Native Endpoint Workspace are recorded here. `v0.0.1` is the frozen trial baseline derived from the accepted `v0.0.1rc17` freeze candidate.
+All notable changes to Native Endpoint Workspace are recorded here. `v0.0.1` is the frozen trial baseline derived from the accepted `v0.0.1rc17` freeze candidate and remains unchanged. Maintenance fixes begin at `v0.0.2rc01`.
+
+## v0.0.2rc01 — Endpoint Identity Runtime Enforcement + Group Visibility State Correctness
+
+- started the maintenance RC line from frozen `v0.0.1`; no changes are made to the frozen release itself
+- rejected new endpoint bindings when bind-time process start time cannot be established, making the strong identity policy explicit and fail-closed
+- required strong process-start identity revalidation on the periodic health path and immediately before external-window native mutations
+- retained lightweight HWND/PID/TID/class validation for read-only/high-frequency inspection paths to avoid adding repeated process queries to interactive layout work
+- protected geometry, repaint, Z-order anchor use, minimize, and restore mutation boundaries with strong endpoint identity validation
+- added toolbar-specific minimized-handle tracking so group Restore touches only endpoints successfully minimized by the toolbar action
+- preserved applications that were already minimized before group Minimize; they are no longer restored by the Workspace toolbar
+- kept failed restore requests tracked for retry while the endpoint remains bound and removed tracking when an endpoint is detached/rebound/destroyed
+- added policy regression coverage for strong runtime identity enforcement and toolbar restore tracking
+- advanced application/runtime/source metadata to `v0.0.2rc01`
+- intentionally deferred the separate review findings for raw shortcut validation ordering, off-screen minimum-size accommodation, and failure-safe layout persistence to later maintenance RCs
 
 ## v0.0.1 — Frozen Trial Baseline
 

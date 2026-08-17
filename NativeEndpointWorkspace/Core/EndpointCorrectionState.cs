@@ -4,7 +4,6 @@ namespace NativeEndpointWorkspace.Core
 {
     public sealed class EndpointCorrectionState
     {
-
         public int ConsecutiveCorrections { get; private set; }
         public DateTime BurstStartedUtc { get; private set; }
         public DateTime BackoffUntilUtc { get; private set; }

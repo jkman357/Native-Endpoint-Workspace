@@ -72,8 +72,7 @@ namespace NativeEndpointWorkspace.UI
             var list = new StackPanel();
             scroll.Content = list;
 
-            var header = BuildHeader();
-            list.Children.Add(header);
+            list.Children.Add(BuildHeader());
 
             foreach (var binding in AppliedBindings.OrderBy(x => x.CellId))
             {

@@ -1,12 +1,12 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1  
+**Current version:** v0.0.2rc01  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
-**Status:** Frozen trial baseline
+**Status:** Trial maintenance RC — bug/regression fixes only
 
 Native Endpoint Workspace is a Windows workspace for arranging independent native top-level application windows as adaptive tiled **Native Endpoints**. External applications stay normal top-level windows; the Workspace manages their screen geometry, Cell membership, layout lock, group visibility, and Z-order without embedding or reparenting.
 
-Typical endpoints include Firefox top-level windows, Windows Explorer, Notepad++, VS Code, Terminal/Command Prompt, Calculator, Paint, and other normal desktop applications.
+`v0.0.1` remains the immutable frozen trial baseline. `v0.0.2rc01` starts the maintenance line and addresses two review findings only: runtime strong endpoint-identity enforcement and group minimize/restore state correctness.
 
 For release history, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -22,13 +22,13 @@ WPF Workspace
     |
     +-- EndpointRegistry
     |       +-- runtime-only HWND/PID/TID/process metadata
-    |       +-- destroy-observed tombstone on the bound instance
+    |       +-- process start time + destroy-observed tombstone
     |
     +-- Native Layout Commit
     |       +-- ~45 ms interactive coalescing
     |       +-- final precise commit after resize/splitter operations
     |       +-- requested vs verified geometry state
-    |       +-- verified endpoint repaint/convergence handling after async resize settles
+    |       +-- verified endpoint repaint/convergence handling
     |
     +-- Endpoint Layout Lock
     |       +-- out-of-context WinEvent observation
@@ -36,7 +36,7 @@ WPF Workspace
     |       +-- bounded correction/backoff
     |
     +-- NativeWindowCoordinator
-            +-- identity validation
+            +-- strong identity revalidation at health/mutation boundaries
             +-- asynchronous external geometry requests
             +-- single-anchor endpoint-group Z-order
             +-- no-activation group minimize/restore
@@ -62,9 +62,9 @@ External apps remain independent native top-level windows.
 
 1. Start Native Endpoint Workspace.
 2. Bring the target application window to the foreground.
-3. Press `Ctrl+Shift+F1` for Cell 1, `Ctrl+Shift+F2` for Cell 2, and so on.
-4. The foreground top-level window is bound to that Cell and follows its screen rectangle.
-5. Move/resize/maximize/restore the Workspace or drag Cell splitters; bound endpoints are resynchronized automatically.
+3. Press `Ctrl+Shift+F1` for Cell 1, `Ctrl+Shift+F2` for Cell 2, and so on through F8.
+4. The foreground top-level window is described and must have a verifiable process start time before the binding is accepted.
+5. The accepted endpoint follows its Cell screen rectangle under Adaptive Layout Lock.
 
 Firefox tabs are not endpoints. Use separate Firefox top-level windows for separate Cells.
 
@@ -73,11 +73,9 @@ Firefox tabs are not endpoints. Use separate Firefox top-level windows for separ
 - **Detach:** releases the endpoint from its Cell and Layout Lock; the application remains open.
 - **Application X:** close the application using its own native window controls. Destroy/stale handling clears the Cell automatically.
 - **Remove a specific Cell:** click its `F#` badge. If an endpoint is bound, confirm the removal; that endpoint is detached and left open. Later Cells shift down to keep contiguous `F1...FN` identities and the layout reflows automatically.
-- **Reduce Cell count:** the `Cells` selector still supports bulk count changes; endpoints in removed trailing Cells are detached and applications remain open.
+- **Reduce Cell count:** the `Cells` selector supports bulk count changes; endpoints in removed trailing Cells are detached and applications remain open.
 - **Load Layout:** runtime endpoint handles are not restored from disk.
 - **Close Workspace:** all bindings are detached/stopped and **external applications remain open**. The Workspace does not send `WM_CLOSE` to external applications.
-
-The detach-only Workspace shutdown policy avoids treating a raw HWND as an infallible destructive-operation identity.
 
 ## Endpoint identity hardening
 
@@ -86,23 +84,38 @@ Runtime identity captures:
 - HWND
 - process ID
 - thread ID
-- process start time when available
+- process start time
 - window class
 - per-binding runtime instance ID
 
-A strong identity check is fail-closed when bind-time/current process start time cannot be verified. An observed `EVENT_OBJECT_DESTROY` tombstones the currently bound endpoint instance before UI-thread cleanup, so that instance can no longer validate as current even if the numeric HWND value is later reused.
+`v0.0.2rc01` closes the gap between the existing strong identity policy and runtime behavior:
+
+- a new binding is rejected if bind-time process start time cannot be established;
+- the periodic health revalidation path requires the strong process-start check;
+- external-window native mutations (geometry, repaint, Z-order anchor use, minimize, restore) require the strong process-start check immediately before mutation;
+- read-only probes may continue to use the lightweight HWND/PID/TID/class check to avoid adding repeated process queries to high-frequency layout inspection;
+- strong validation fails closed when current process start time cannot be queried or no longer matches;
+- an observed `EVENT_OBJECT_DESTROY` tombstones the bound endpoint instance before UI-thread cleanup.
 
 Runtime HWND/PID/TID data is never persisted to layout files.
+
+## Group visibility semantics
+
+The toolbar group minimize/restore action now tracks exactly which endpoints it successfully asked to minimize.
+
+- Endpoints already minimized before the toolbar operation are **not** added to the toolbar restore set.
+- Restore acts only on the tracked set, so user-pre-minimized applications remain minimized.
+- Failed restore requests remain tracked so the action can be retried while the endpoint remains bound.
+- Detach/rebind/destroy removes the relevant handle from the toolbar restore set and refreshes the toolbar state.
+
+Workspace minimize/restore remains a separate lifecycle path with its own tracking set.
 
 ## Adaptive layout
 
 - 1 through 8 Cells; default 8.
-- Cell headers use compact clickable `F1` through `F8` badges. Clicking a badge removes that specific Cell, down to a single remaining Cell.
-- The fixed per-Cell `layout locked` footer is removed; status output is reserved for useful runtime events/results.
-- Workspace owns a fixed total layout area.
-- Splitters redistribute area instead of allowing Cells to float outside the Workspace.
-- Each row can have independent horizontal proportions.
-- Row heights can be redistributed.
+- Cell headers use clickable `F1` through `F8` badges.
+- Splitters redistribute a fixed Workspace layout area.
+- Each row can have independent horizontal proportions; row heights can also be redistributed.
 - Applications that reject an undersized rectangle can cause their Cell/row allocation to grow; the Workspace may grow within the monitor work area.
 - Removing an arbitrary Cell reindexes later Cells contiguously and immediately rebuilds the adaptive topology.
 - `Reset Cell Layout` restores equal proportions without dropping bindings.
@@ -128,34 +141,13 @@ Ctrl+O  Load Layout
 
 ## Save / Load and schema version
 
-Layout files persist:
+Layout files persist `LayoutSchemaVersion`, application version for provenance, Cell count, adaptive row/Cell proportions, and shortcut mappings. Runtime endpoint handles are never persisted.
 
-- `LayoutSchemaVersion`
-- application version for provenance
-- Cell count
-- adaptive row heights
-- per-row Cell-width proportions
-- shortcut mappings
-
-`LayoutSchemaVersion` is independent from the application RC version. rc12 writes schema version `1`. Legacy rc01-rc11 files without the schema field are accepted only when their application version exactly matches the `0.0.1` / `0.0.1rcN` line.
-
-Load validates structure before mutating the active Workspace. OS-level global hotkey registration is also included in the transaction; a partial registration failure restores the previous shortcut set and causes the load to fail/roll back.
+`LayoutSchemaVersion` remains independent from the application RC version. Schema version 1 is unchanged in `v0.0.2rc01`. The separate review findings concerning raw shortcut validation order and failure-safe layout save are intentionally **not** changed in this RC.
 
 ## DPI baseline
 
-rc12 explicitly opts the .NET Framework 4.7.2 WPF process into **Per-Monitor DPI awareness** using `app.manifest` (`true/pm` / `PerMonitor`) and enables WPF DPI-change handling through `App.config`.
-
-`WM_DPICHANGED` schedules a final endpoint geometry commit after the WPF layout transition.
-
-Required mixed-DPI regression cases before claiming multi-monitor hardening:
-
-- 100% -> 150%
-- 150% -> 100%
-- 125% -> 200%
-- maximize/restore on a secondary monitor
-- move the Workspace between different-DPI monitors
-- monitor resolution/DPI change or hot-plug
-- endpoints with different DPI-awareness modes
+The .NET Framework 4.7.2 WPF process is Per-Monitor DPI aware through `app.manifest` and `App.config`. `WM_DPICHANGED` schedules a final endpoint geometry commit after the WPF layout transition.
 
 ## Runtime diagnostics
 
@@ -165,7 +157,7 @@ Runtime diagnostics are written under:
 logs\NativeEndpointWorkspace.log
 ```
 
-Default level is `INFO`. To enable additional layout-commit diagnostics for a test session:
+Default level is `INFO`. For extra layout diagnostics:
 
 ```bat
 set NATIVE_ENDPOINT_WORKSPACE_LOG_LEVEL=DEBUG
@@ -175,32 +167,10 @@ run.cmd
 Log policy:
 
 - maximum active file size: 5 MB
-- retention: 5 log files total (active + rotated backups)
-- rotation is automatic
+- retention: 5 log files total
 - logging failure must not stop the Workspace
-- DEBUG mode records requested/observed endpoint rectangles and geometry-convergence results for resize/repaint investigation
-
-Examples of recorded events:
-
-- Workspace session start/exit
-- endpoint bind/detach/destroy
-- Cell removal/reindex and adaptive reflow
-- Cell ID, HWND, PID/TID, process name
-- shortcut apply/rollback
-- save/load success/failure
-- DPI change
-- slow Native Layout Commit warnings
-- optional DEBUG layout commit duration/counts
-
-The runtime log deliberately does **not** record:
-
-- webpage contents
-- typed user input
-- clipboard contents
-- passwords/credentials
-- browser cookies/session data
-- full endpoint window titles
-- full Explorer paths or document names derived from window titles
+- DEBUG mode records requested/observed endpoint rectangles and convergence results
+- logs do not record webpage contents, typed input, clipboard contents, passwords/credentials, browser cookies/session data, full endpoint titles, or full Explorer/document paths derived from titles
 
 ## Security and privacy
 
@@ -215,66 +185,36 @@ Requirements:
 - Windows 10
 - Visual Studio/MSBuild with the .NET Framework 4.7.2 Developer/Targeting Pack
 
-From the repository root:
-
 ```bat
 build.cmd
 ```
 
-`build.cmd` keeps console output concise and always writes detailed MSBuild diagnostics to:
-
-```text
-logs\build.log
-```
-
-If MSBuild cannot be found, the same log file is still created with the launch failure reason. Attach `logs\build.log` when reporting a build failure.
+Detailed diagnostics are written to `logs\build.log`.
 
 ## Test
-
-The repository includes a dependency-free .NET Framework test executable for extracted pure policy/state logic:
 
 ```bat
 test.cmd
 ```
 
-`test.cmd` first runs the normal build, then records policy-test output in:
+Policy-test output is written to `logs\test.log`. Automated characterization includes strong endpoint identity fail-closed behavior, required runtime strong-check policy, toolbar restore-tracking policy, exact legacy layout-version boundaries, Cell topology, arbitrary Cell removal shifting, destroy tombstoning, hotkey rollback, and unsupported schema rejection.
 
-```text
-logs\test.log
-```
+Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry, actual minimize/restore) still requires real Windows runtime regression testing.
 
-If the build stage fails, the test run stops and `logs\test.log` points to `logs\build.log`.
+## v0.0.2rc01 regression focus
 
-Initial automated characterization covers:
-
-- strong endpoint identity fail-closed behavior
-- exact legacy layout-version boundary behavior
-- Cell topology fail-fast behavior
-- arbitrary Cell removal endpoint-shift behavior
-- destroy tombstone behavior
-- global-hotkey transaction rollback
-- unsupported layout schema rejection
-
-Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry) still requires real Windows runtime regression testing.
+1. Run `test.cmd`; confirm all policy tests PASS and preserve both `logs\build.log` and `logs\test.log`.
+2. Bind mixed apps and exercise move/resize/maximize/restore/splitter operations; confirm no new layout latency or flicker regression.
+3. Minimize one bound app manually, then press group Minimize and group Restore; confirm the manually minimized app stays minimized.
+4. Detach or close an endpoint while it is in the toolbar restore set; confirm the toolbar state converges and does not attempt to restore an unrelated/reused HWND.
+5. Confirm normal binds succeed for standard desktop apps and runtime logs contain no `ENDPOINT_BIND_REJECTED` unless process start identity truly cannot be established.
+6. Confirm closing the Workspace leaves all external applications open.
 
 ## Run
 
 ```bat
 run.cmd
 ```
-
-## rc13 regression focus
-
-1. Bind 4-8 mixed apps and repeat Workspace move/resize/maximize/restore and splitter drag.
-2. Confirm `Detach` leaves the external app open and independent.
-3. Close the Workspace with bound apps; confirm every external app remains open.
-4. Force a shortcut conflict during Settings/Load and confirm the previous shortcut set still works afterward.
-5. Move the Workspace between monitors with different Windows scaling values and compare Cell/endpoint pixel bounds.
-6. Close/recreate an endpoint and confirm the destroyed binding does not resume management of a replacement window.
-7. Inspect `logs\NativeEndpointWorkspace.log`; verify no endpoint titles, paths, typed text, credentials, or browser content are present.
-8. Run `test.cmd` and confirm all policy tests PASS.
-9. Force or inspect any build failure and confirm `logs\build.log` contains detailed MSBuild diagnostics.
-10. Confirm `test.cmd` creates `logs\test.log` and preserves `logs\build.log` for build failures.
 
 ## Disclaimer
 

@@ -20,7 +20,6 @@ namespace NativeEndpointWorkspace
 {
     public partial class MainWindow : Window
     {
-
         private readonly NativeWindowCoordinator _windowCoordinator = new NativeWindowCoordinator();
         private readonly EndpointRegistry _registry = new EndpointRegistry();
         private readonly LayoutService _layoutService = new LayoutService();
@@ -38,7 +37,7 @@ namespace NativeEndpointWorkspace
         private readonly Dictionary<IntPtr, EndpointCorrectionState> _correctionStates = new Dictionary<IntPtr, EndpointCorrectionState>();
         private readonly HashSet<IntPtr> _pendingLocationCorrections = new HashSet<IntPtr>();
         private readonly HashSet<IntPtr> _minimizedWithWorkspace = new HashSet<IntPtr>();
-        // Async SetWindowPos separates submitted desired geometry from observed/verified geometry.
+        private readonly HashSet<IntPtr> _minimizedByToolbar = new HashSet<IntPtr>();
         private readonly Dictionary<int, Rect> _lastRequestedCellRects = new Dictionary<int, Rect>();
         private readonly Dictionary<int, Rect> _lastVerifiedCellRects = new Dictionary<int, Rect>();
         private readonly DispatcherTimer _windowHealthTimer;
@@ -87,8 +86,6 @@ namespace NativeEndpointWorkspace
             _layoutLockService.ForegroundChanged += LayoutLockService_ForegroundChanged;
             _layoutLockService.WindowDestroyed += LayoutLockService_WindowDestroyed;
 
-            // Slow detection-only health fallback. Interactive/final commits are driven by
-            // explicit move/resize/splitter/DPI events, not by an unbounded LayoutUpdated path.
             _windowHealthTimer = new DispatcherTimer { Interval = WorkspaceConstants.EndpointHealthInterval };
             _windowHealthTimer.Tick += WindowHealthTimer_Tick;
 
@@ -362,13 +359,9 @@ namespace NativeEndpointWorkspace
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == NativeMethods.WM_ENTERSIZEMOVE)
-            {
                 RequestInteractiveGeometrySync(false);
-            }
             else if (msg == NativeMethods.WM_EXITSIZEMOVE)
-            {
                 RequestFinalNativeLayoutCommit(false);
-            }
             else if (msg == NativeMethods.WM_DPICHANGED)
             {
                 RequestFinalNativeLayoutCommit(false);
@@ -410,7 +403,7 @@ namespace NativeEndpointWorkspace
             }
 
             NativeEndpoint existing = _registry.GetByHandle(target);
-            if (existing != null && !_windowCoordinator.IsEndpointIdentityCurrent(existing, false))
+            if (existing != null && !_windowCoordinator.IsEndpointIdentityCurrent(existing, EndpointIdentityPolicy.RequireStrongCheckForHealthRevalidation))
             {
                 UnbindStaleEndpoint(existing, "stale handle detected during bind");
                 existing = null;
@@ -425,10 +418,15 @@ namespace NativeEndpointWorkspace
             }
 
             NativeEndpoint endpoint = _windowCoordinator.DescribeWindow(cellId, target);
+            if (!EndpointIdentityPolicy.CanEstablishStrongIdentity(endpoint.ProcessStartTimeUtcTicks))
+            {
+                _runtimeLog.Warn("ENDPOINT_BIND_REJECTED", RuntimeLogService.EndpointMetadata(endpoint) + " reason=process_start_unavailable");
+                StatusText.Text = "Cell " + cellId + ": binding rejected because process start time could not be verified for strong endpoint identity.";
+                return;
+            }
+
             NativeEndpoint old = _registry.Bind(cellId, endpoint);
             _runtimeLog.Info("ENDPOINT_BIND", RuntimeLogService.EndpointMetadata(endpoint));
-            if (endpoint.ProcessStartTimeUtcTicks <= 0)
-                _runtimeLog.Warn("ENDPOINT_IDENTITY_PARTIAL", RuntimeLogService.EndpointMetadata(endpoint) + " process_start_unavailable=1");
             if (old != null)
                 ClearEndpointRuntimeState(old);
             RefreshManagedHandleSnapshot();
@@ -515,6 +513,15 @@ namespace NativeEndpointWorkspace
             _layoutLockService.UpdateManagedHandles(_registry.All().Select(x => x.Handle));
         }
 
+        private void SetGroupVisibilityToolbarState(bool restoreMode)
+        {
+            _endpointGroupMinimizedByToolbar = restoreMode;
+            GroupVisibilityButton.Content = restoreMode ? "▣" : "▁";
+            GroupVisibilityButton.ToolTip = restoreMode
+                ? "Restore endpoints minimized by this toolbar action"
+                : "Minimize all bound endpoints";
+        }
+
         private void ClearEndpointRuntimeState(NativeEndpoint endpoint)
         {
             if (endpoint == null)
@@ -524,6 +531,8 @@ namespace NativeEndpointWorkspace
             _pendingLocationCorrections.Remove(endpoint.Handle);
             _correctionStates.Remove(endpoint.Handle);
             _minimizedWithWorkspace.Remove(endpoint.Handle);
+            if (_minimizedByToolbar.Remove(endpoint.Handle))
+                SetGroupVisibilityToolbarState(_minimizedByToolbar.Count > 0);
 
             DispatcherTimer sizeTimer;
             if (_sizeVerificationTimers.TryGetValue(endpoint.Handle, out sizeTimer))
@@ -596,10 +605,6 @@ namespace NativeEndpointWorkspace
             {
                 _lastVerifiedCellRects[endpoint.CellId] = desired;
                 GetCorrectionState(endpoint.Handle).Reset();
-
-                // Once geometry is observed at the desired rectangle, invalidate the top-level
-                // window and its child hierarchy through one HWND-scoped RedrawWindow request.
-                // This does not enumerate child HWNDs or manipulate focus/input.
                 if (_windowCoordinator.RequestClientRepaint(current))
                     _runtimeLog.Debug("ENDPOINT_REPAINT_HINT", geometryDetails + " scope=top_and_children");
                 return;
@@ -803,6 +808,8 @@ namespace NativeEndpointWorkspace
             if (endpoint == null || !_cells.TryGetValue(cellId, out cell)) return GeometrySyncResult.Failed;
             if (WindowState == WindowState.Minimized) return GeometrySyncResult.SkippedMinimized;
 
+            // Lightweight read-only preflight; SyncToRectangle enforces strong identity at
+            // the actual external-window mutation boundary.
             EndpointIdentityStatus identity = _windowCoordinator.ValidateEndpointIdentity(endpoint, false);
             if (identity != EndpointIdentityStatus.Current)
                 return GeometrySyncResult.StaleEndpoint;
@@ -831,7 +838,6 @@ namespace NativeEndpointWorkspace
             }
             else if (result == GeometrySyncResult.Applied)
             {
-                // Async native success means the request was submitted. Verification is separate.
                 _lastRequestedCellRects[cellId] = bounds;
                 ScheduleEndpointSizeVerification(endpoint);
             }
@@ -876,7 +882,6 @@ namespace NativeEndpointWorkspace
                         Rect requestedRect;
                         if (_lastRequestedCellRects.TryGetValue(endpoint.CellId, out requestedRect) && AreScreenRectsEquivalent(requestedRect, desiredRect))
                         {
-                            // A matching async request is already in flight or awaiting verification.
                             ScheduleEndpointSizeVerification(endpoint);
                             continue;
                         }
@@ -930,9 +935,6 @@ namespace NativeEndpointWorkspace
             RequestFinalNativeLayoutCommit(showCompletionStatus);
         }
 
-        // Interactive performance path: known WPF events only mark geometry dirty. Interactive
-        // drag/resize updates are coalesced to a bounded cadence; release/restore/resync
-        // requests use one final Render-priority commit.
         private void RequestInteractiveGeometrySync(bool showCompletionStatus)
         {
             if (!_initialLayoutApplied || !IsLoaded || _buildingGrid || _workspaceCloseAccepted || WindowState == WindowState.Minimized)
@@ -1017,8 +1019,6 @@ namespace NativeEndpointWorkspace
             _committingNativeLayout = true;
             try
             {
-                // Final commits force the current WPF arrangement once. Interactive commits
-                // are triggered after known layout events and avoid UpdateLayout() on every tick.
                 if (forceAllGeometry)
                     WorkspaceGrid.UpdateLayout();
 
@@ -1094,10 +1094,6 @@ namespace NativeEndpointWorkspace
                     return;
                 }
 
-                // Z-order invariant: do nothing while every healthy endpoint is already above
-                // the Workspace. If correction is required, move the Workspace exactly once
-                // behind the bottom-most managed endpoint. This avoids the visible flicker
-                // caused by moving the opaque Workspace once per endpoint.
                 if (workspaceBelowAllEndpoints)
                     return;
 
@@ -1212,8 +1208,6 @@ namespace NativeEndpointWorkspace
 
         private void LayoutLockService_WindowLocationChanged(IntPtr hwnd)
         {
-            // EndpointLayoutLockService already filters unrelated HWNDs on the WinEvent
-            // callback thread. Marshal only a managed endpoint correction to WPF.
             Dispatcher.BeginInvoke(new Action(delegate
             {
                 if (_workspaceCloseAccepted || WindowState == WindowState.Minimized || _syncingEndpoints)
@@ -1286,7 +1280,8 @@ namespace NativeEndpointWorkspace
         {
             foreach (NativeEndpoint endpoint in _registry.All().ToArray())
             {
-                EndpointIdentityStatus identity = _windowCoordinator.ValidateEndpointIdentity(endpoint, false);
+                EndpointIdentityStatus identity = _windowCoordinator.ValidateEndpointIdentity(
+                    endpoint, EndpointIdentityPolicy.RequireStrongCheckForHealthRevalidation);
                 if (identity == EndpointIdentityStatus.Current)
                     continue;
 
@@ -1297,9 +1292,6 @@ namespace NativeEndpointWorkspace
             foreach (IntPtr stale in _locationCorrectionSuppressedUntil.Where(x => nowUtc > x.Value.AddSeconds(2)).Select(x => x.Key).ToArray())
                 _locationCorrectionSuppressedUntil.Remove(stale);
 
-            // Low-frequency health fallback is detection-only while the group is stable.
-            // Reapply native layout only when geometry or the endpoint-group Z-order invariant
-            // is observed to be broken; idle healthy endpoints receive no SetWindowPos calls.
             if (IsWorkspaceGroupForeground(_windowCoordinator.GetForegroundWindow()) && HasNativeLayoutViolation())
                 RequestFinalNativeLayoutCommit(false);
         }
@@ -1321,34 +1313,58 @@ namespace NativeEndpointWorkspace
             {
                 int requested = 0;
                 int failed = 0;
-                foreach (NativeEndpoint endpoint in _registry.All().ToArray())
+                foreach (IntPtr hwnd in _minimizedByToolbar.ToArray())
                 {
+                    NativeEndpoint endpoint = _registry.GetByHandle(hwnd);
+                    if (endpoint == null)
+                    {
+                        _minimizedByToolbar.Remove(hwnd);
+                        continue;
+                    }
+
                     requested++;
-                    if (!_windowCoordinator.RestoreWithoutActivate(endpoint))
+                    if (_windowCoordinator.RestoreWithoutActivate(endpoint))
+                        _minimizedByToolbar.Remove(hwnd);
+                    else
                         failed++;
                 }
 
-                _endpointGroupMinimizedByToolbar = false;
-                GroupVisibilityButton.Content = "▁";
-                GroupVisibilityButton.ToolTip = "Minimize all bound endpoints";
-                RequestFinalNativeLayoutCommit(false);
-                StatusText.Text = "No-activation restore requested for " + requested + " endpoint(s); " + failed + " request(s) failed/skipped.";
+                SetGroupVisibilityToolbarState(_minimizedByToolbar.Count > 0);
+                if (_minimizedByToolbar.Count == 0)
+                    RequestFinalNativeLayoutCommit(false);
+
+                StatusText.Text = "No-activation restore requested for " + requested +
+                                  " endpoint(s) minimized by the toolbar; " + failed +
+                                  " request(s) failed/skipped, " + _minimizedByToolbar.Count + " remain tracked.";
                 return;
             }
 
+            _minimizedByToolbar.Clear();
             int minimizeRequested = 0;
             int minimizeFailed = 0;
+            int alreadyMinimized = 0;
             foreach (NativeEndpoint endpoint in _registry.All().ToArray())
             {
+                bool wasAlreadyMinimized = _windowCoordinator.IsMinimized(endpoint);
+                if (wasAlreadyMinimized)
+                {
+                    alreadyMinimized++;
+                    continue;
+                }
+
                 minimizeRequested++;
-                if (!_windowCoordinator.MinimizeWithoutActivate(endpoint))
+                bool accepted = _windowCoordinator.MinimizeWithoutActivate(endpoint);
+                if (GroupVisibilityPolicy.ShouldTrackForToolbarRestore(wasAlreadyMinimized, accepted))
+                    _minimizedByToolbar.Add(endpoint.Handle);
+                else if (!accepted)
                     minimizeFailed++;
             }
 
-            _endpointGroupMinimizedByToolbar = true;
-            GroupVisibilityButton.Content = "▣";
-            GroupVisibilityButton.ToolTip = "Restore all bound endpoints";
-            StatusText.Text = "No-activation minimize requested for " + minimizeRequested + " endpoint(s); " + minimizeFailed + " request(s) failed/skipped.";
+            SetGroupVisibilityToolbarState(_minimizedByToolbar.Count > 0);
+            StatusText.Text = "No-activation minimize requested for " + minimizeRequested +
+                              " endpoint(s); " + minimizeFailed + " request(s) failed/skipped, " +
+                              alreadyMinimized + " endpoint(s) were already minimized, " +
+                              _minimizedByToolbar.Count + " tracked for toolbar restore.";
         }
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -1550,8 +1566,8 @@ namespace NativeEndpointWorkspace
                 int proposedCellCount = ResolveLoadedCellCount(state);
                 IList<ShortcutBinding> proposedShortcuts = MergeLoadedShortcutBindings(state == null ? null : state.Shortcuts);
 
-                // Review #6: validate the complete proposed state before mutating the active
-                // Workspace. Malformed geometry/shortcuts cannot destroy the working layout.
+                // The raw-shortcut validation ordering finding is intentionally deferred to
+                // a later maintenance RC; rc01 changes only identity and group visibility.
                 WorkspaceStateValidator.Validate(state, proposedCellCount, proposedShortcuts);
 
                 foreach (NativeEndpoint endpoint in oldEndpoints)
@@ -1561,6 +1577,8 @@ namespace NativeEndpointWorkspace
                 _pendingLocationCorrections.Clear();
                 _correctionStates.Clear();
                 _minimizedWithWorkspace.Clear();
+                _minimizedByToolbar.Clear();
+                SetGroupVisibilityToolbarState(false);
                 _cellMinimumHostWidths.Clear();
                 _cellMinimumHostHeights.Clear();
                 RefreshManagedHandleSnapshot();
@@ -1602,6 +1620,8 @@ namespace NativeEndpointWorkspace
             IEnumerable<NativeEndpoint> endpoints, IDictionary<int, double> minWidths, IDictionary<int, double> minHeights)
         {
             _registry.Clear();
+            _minimizedByToolbar.Clear();
+            SetGroupVisibilityToolbarState(false);
             _cellCount = cellCount;
             _updatingCellCountUi = true;
             try { CellCountComboBox.SelectedItem = _cellCount; }
@@ -1715,8 +1735,6 @@ namespace NativeEndpointWorkspace
 
         private void MainWindow_Activated(object sender, EventArgs e)
         {
-            // Activation affects only the managed endpoint Z-order invariant. Geometry
-            // is left untouched unless a separate layout event marks it dirty.
             ScheduleEndpointGroupNormalize();
         }
 
@@ -1775,13 +1793,13 @@ namespace NativeEndpointWorkspace
             NativeEndpoint[] endpoints = _registry.All().ToArray();
             _runtimeLog.Info("WORKSPACE_CLOSE", "detach_only=1 bound_endpoints=" + endpoints.Length);
 
-            // Workspace lifetime never owns external application lifetime. Closing the
-            // Workspace stops management and leaves every bound application open.
             _windowHealthTimer.Stop();
             _interactiveCommitTimer.Stop();
             StopAllSizeVerificationTimers();
             _layoutLockService.Dispose();
             _registry.Clear();
+            _minimizedByToolbar.Clear();
+            SetGroupVisibilityToolbarState(false);
             RefreshManagedHandleSnapshot();
         }
 

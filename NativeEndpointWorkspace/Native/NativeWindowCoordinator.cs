@@ -7,7 +7,6 @@ namespace NativeEndpointWorkspace.Native
 {
     public class NativeWindowCoordinator
     {
-
         public IntPtr GetForegroundWindow()
         {
             return NativeMethods.GetForegroundWindow();
@@ -26,6 +25,8 @@ namespace NativeEndpointWorkspace.Native
             return pid == (uint)Process.GetCurrentProcess().Id;
         }
 
+        // Read-only probes deliberately use the lightweight identity check. Health
+        // revalidation and every external native mutation use the strong policy below.
         public bool IsMinimized(NativeEndpoint endpoint)
         {
             return IsEndpointIdentityCurrent(endpoint, false) && NativeMethods.IsIconic(endpoint.Handle);
@@ -43,15 +44,12 @@ namespace NativeEndpointWorkspace.Native
 
         public bool RequestClientRepaint(NativeEndpoint endpoint)
         {
-            if (!IsEndpointIdentityCurrent(endpoint, false) ||
+            if (!IsEndpointIdentityCurrent(endpoint, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation) ||
                 NativeMethods.IsIconic(endpoint.Handle) ||
                 NativeMethods.IsHungAppWindow(endpoint.Handle) ||
                 !NativeMethods.IsWindowVisible(endpoint.Handle))
                 return false;
 
-            // Invalidate the top-level window plus its child hierarchy without enumerating,
-            // guessing, focusing, or directly manipulating application-specific child HWNDs.
-            // No RDW_UPDATENOW is used, so repaint work remains owned by the endpoint UI thread.
             return NativeMethods.RedrawWindow(
                 endpoint.Handle,
                 IntPtr.Zero,
@@ -161,7 +159,7 @@ namespace NativeEndpointWorkspace.Native
         public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height, bool discardClientBits, out int nativeErrorCode)
         {
             nativeErrorCode = 0;
-            if (!IsEndpointIdentityCurrent(endpoint, false))
+            if (!IsEndpointIdentityCurrent(endpoint, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation))
                 return GeometrySyncResult.StaleEndpoint;
 
             if (NativeMethods.IsIconic(endpoint.Handle))
@@ -203,14 +201,10 @@ namespace NativeEndpointWorkspace.Native
             return WindowRectMatches(endpoint.Handle, x, y, Math.Max(1, width), Math.Max(1, height));
         }
 
-        // Endpoint Z-order requests are asynchronous across process/thread boundaries so an
-        // unresponsive external UI thread cannot block the WPF Dispatcher. Bound Cells do
-        // not overlap, so relative endpoint order is not relied on for layout correctness.
         public bool RaiseWithoutActivate(NativeEndpoint endpoint)
         {
-            if (!IsEndpointIdentityCurrent(endpoint, false) || NativeMethods.IsIconic(endpoint.Handle))
-                return false;
-            if (NativeMethods.IsHungAppWindow(endpoint.Handle))
+            if (!IsEndpointIdentityCurrent(endpoint, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation) ||
+                NativeMethods.IsIconic(endpoint.Handle) || NativeMethods.IsHungAppWindow(endpoint.Handle))
                 return false;
 
             return NativeMethods.SetWindowPos(
@@ -223,10 +217,6 @@ namespace NativeEndpointWorkspace.Native
                 NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_ASYNCWINDOWPOS);
         }
 
-        // Analyze the normal top-level Z-order without changing it. Enumeration starts at
-        // the top and walks downward. The invariant is satisfied only when every supplied
-        // managed endpoint is above the opaque Workspace. bottomMostEndpoint is the managed
-        // endpoint nearest the Workspace and is the only anchor needed for a correction.
         public bool TryAnalyzeEndpointGroupZOrder(
             IntPtr workspaceHwnd,
             NativeEndpoint[] endpoints,
@@ -257,8 +247,6 @@ namespace NativeEndpointWorkspace.Native
             int guard = 0;
             IntPtr current = NativeMethods.GetTopWindow(IntPtr.Zero);
 
-            // Defensive guard prevents an unexpected native enumeration anomaly from
-            // becoming an unbounded loop on the caller's UI thread.
             while (current != IntPtr.Zero && guard++ < WorkspaceConstants.MaximumZOrderEnumerationWindows)
             {
                 if (current == workspaceHwnd)
@@ -298,7 +286,9 @@ namespace NativeEndpointWorkspace.Native
         public bool PlaceWorkspaceBehindEndpoint(IntPtr workspaceHwnd, NativeEndpoint endpointAbove, out int nativeErrorCode)
         {
             nativeErrorCode = 0;
-            if (!IsValidWindow(workspaceHwnd) || !IsEndpointIdentityCurrent(endpointAbove, false) || workspaceHwnd == endpointAbove.Handle)
+            if (!IsValidWindow(workspaceHwnd) ||
+                !IsEndpointIdentityCurrent(endpointAbove, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation) ||
+                workspaceHwnd == endpointAbove.Handle)
                 return false;
 
             bool ok = NativeMethods.SetWindowPos(
@@ -314,18 +304,16 @@ namespace NativeEndpointWorkspace.Native
             return ok;
         }
 
-        // Group operations deliberately avoid activation. User clicks are the only path that
-        // should naturally activate an endpoint.
         public bool MinimizeWithoutActivate(NativeEndpoint endpoint)
         {
-            if (!IsEndpointIdentityCurrent(endpoint, false))
+            if (!IsEndpointIdentityCurrent(endpoint, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation))
                 return false;
             return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_SHOWMINNOACTIVE);
         }
 
         public bool RestoreWithoutActivate(NativeEndpoint endpoint)
         {
-            if (!IsEndpointIdentityCurrent(endpoint, false))
+            if (!IsEndpointIdentityCurrent(endpoint, EndpointIdentityPolicy.RequireStrongCheckForNativeMutation))
                 return false;
             return NativeMethods.ShowWindowAsync(endpoint.Handle, NativeMethods.SW_SHOWNOACTIVATE);
         }

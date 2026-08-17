@@ -15,6 +15,8 @@ namespace NativeEndpointWorkspace.Tests
         private static int Main()
         {
             Run("Strong identity fails closed when bind-time start time is missing", TestStrongIdentityFailsClosed);
+            Run("Runtime identity policy requires strong health and mutation checks", TestStrongRuntimeIdentityPolicy);
+            Run("Toolbar restore tracks only endpoints minimized by toolbar", TestToolbarRestoreTrackingPolicy);
             Run("Legacy layout version matching is exact", TestLayoutVersionBoundaries);
             Run("Invalid Cell topology fails fast", TestTopologyFailFast);
             Run("Cell and shortcut surface is bounded to 1-8", TestCellAndShortcutBounds);
@@ -38,6 +40,22 @@ namespace NativeEndpointWorkspace.Tests
                 EndpointIdentityPolicy.EvaluateStrongProcessStart(1234, true, 1234));
             AssertEqual(EndpointIdentityStatus.ProcessStartTimeChanged,
                 EndpointIdentityPolicy.EvaluateStrongProcessStart(1234, true, 5678));
+            AssertFalse(EndpointIdentityPolicy.CanEstablishStrongIdentity(0));
+            AssertTrue(EndpointIdentityPolicy.CanEstablishStrongIdentity(1234));
+        }
+
+        private static void TestStrongRuntimeIdentityPolicy()
+        {
+            AssertTrue(EndpointIdentityPolicy.RequireStrongCheckForHealthRevalidation);
+            AssertTrue(EndpointIdentityPolicy.RequireStrongCheckForNativeMutation);
+        }
+
+        private static void TestToolbarRestoreTrackingPolicy()
+        {
+            AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(true, true));
+            AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(true, false));
+            AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(false, false));
+            AssertTrue(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(false, true));
         }
 
         private static void TestLayoutVersionBoundaries()
@@ -71,10 +89,7 @@ namespace NativeEndpointWorkspace.Tests
                 AssertEqual(1, defaults.First().CellId);
                 AssertEqual(8, defaults.Last().CellId);
             }
-            finally
-            {
-                service.Dispose();
-            }
+            finally { service.Dispose(); }
         }
 
         private static void TestDestroyTombstone()
@@ -114,10 +129,7 @@ namespace NativeEndpointWorkspace.Tests
                 AssertTrue(active.All(x => x.Control && x.Shift && !x.Alt));
                 AssertTrue(summary.IndexOf("rolled back", StringComparison.OrdinalIgnoreCase) >= 0);
             }
-            finally
-            {
-                service.Dispose();
-            }
+            finally { service.Dispose(); }
         }
 
         private static void TestCellRemovalShift()
@@ -131,7 +143,6 @@ namespace NativeEndpointWorkspace.Tests
             registry.Bind(8, endpoint8);
 
             NativeEndpoint removed = registry.RemoveCellAndShiftDown(5);
-
             AssertTrue(object.ReferenceEquals(endpoint5, removed));
             AssertTrue(object.ReferenceEquals(endpoint6, registry.GetByCell(5)));
             AssertTrue(object.ReferenceEquals(endpoint8, registry.GetByCell(7)));
@@ -142,18 +153,11 @@ namespace NativeEndpointWorkspace.Tests
 
         private static void TestUnsupportedSchemaRejected()
         {
-            var state = new WorkspaceState
-            {
-                Version = "0.0.1",
-                LayoutSchemaVersion = 99,
-                CellCount = 4
-            };
+            var state = new WorkspaceState { Version = "0.0.1", LayoutSchemaVersion = 99, CellCount = 4 };
             var shortcuts = new List<ShortcutBinding>
             {
-                Binding(1, true, true, false, 0x70),
-                Binding(2, true, true, false, 0x71),
-                Binding(3, true, true, false, 0x72),
-                Binding(4, true, true, false, 0x73)
+                Binding(1, true, true, false, 0x70), Binding(2, true, true, false, 0x71),
+                Binding(3, true, true, false, 0x72), Binding(4, true, true, false, 0x73)
             };
             AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.Validate(state, 4, shortcuts));
         }
@@ -165,45 +169,21 @@ namespace NativeEndpointWorkspace.Tests
 
         private static void Run(string name, Action test)
         {
-            try
-            {
-                test();
-                _passed++;
-                Console.WriteLine("PASS  " + name);
-            }
-            catch (Exception ex)
-            {
-                _failed++;
-                Console.WriteLine("FAIL  " + name + " :: " + ex.Message);
-            }
+            try { test(); _passed++; Console.WriteLine("PASS  " + name); }
+            catch (Exception ex) { _failed++; Console.WriteLine("FAIL  " + name + " :: " + ex.Message); }
         }
 
-        private static void AssertTrue(bool value)
-        {
-            if (!value) throw new Exception("Expected true.");
-        }
-
-        private static void AssertFalse(bool value)
-        {
-            if (value) throw new Exception("Expected false.");
-        }
-
+        private static void AssertTrue(bool value) { if (!value) throw new Exception("Expected true."); }
+        private static void AssertFalse(bool value) { if (value) throw new Exception("Expected false."); }
         private static void AssertEqual<T>(T expected, T actual)
         {
             if (!EqualityComparer<T>.Default.Equals(expected, actual))
                 throw new Exception("Expected " + expected + ", actual " + actual + ".");
         }
-
         private static void AssertThrows<T>(Action action) where T : Exception
         {
-            try
-            {
-                action();
-            }
-            catch (T)
-            {
-                return;
-            }
+            try { action(); }
+            catch (T) { return; }
             throw new Exception("Expected exception " + typeof(T).Name + ".");
         }
 

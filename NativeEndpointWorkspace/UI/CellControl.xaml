@@ -31,7 +31,6 @@
                 <TextBlock x:Name="EmptyText" Foreground="#8C98A8" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                            Text="No endpoint bound"/>
             </Border>
-
         </Grid>
     </Border>
 </UserControl>

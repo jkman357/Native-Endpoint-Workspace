@@ -71,8 +71,6 @@ namespace NativeEndpointWorkspace.Services
                 return true;
             }
 
-            // All-or-nothing transaction: remove any partially registered requested set and
-            // restore the last known working registration set.
             UnregisterAll();
             string rollbackSummary = "No previous shortcut registrations required restoration.";
             bool rollbackOk = previous.Count == 0 || TryRegisterSet(previous, out rollbackSummary);
