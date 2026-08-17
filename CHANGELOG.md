@@ -2,6 +2,18 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. The project remains on the `v0.0.1` RC line until explicitly frozen.
 
+## v0.0.1rc17 — 1-8 Cell Topology + Resize/Repaint Convergence
+
+- reduced the supported Cell range to 1-8 with default 8; F9-F12 topology and global assignment shortcuts are no longer part of the active product surface
+- added 1-, 2-, and 3-Cell adaptive topologies and allowed direct Cell removal down to one remaining Cell
+- hide `Detach` on empty Cells and show it only while an endpoint is bound
+- preserved contiguous F1-FN identities and automatic adaptive reflow after arbitrary Cell removal
+- added final-placement `SWP_NOCOPYBITS` so the system does not preserve/copy stale client pixels during the final native resize request
+- replaced the top-level-only `InvalidateRect` hint with one HWND-scoped `RedrawWindow` invalidation covering the top-level window and its child hierarchy, without child-HWND enumeration, focus manipulation, or input injection
+- added DEBUG requested-vs-observed rectangle diagnostics and a warning when geometry has not converged at verification time
+- retained async endpoint geometry, requested/verified state separation, Z-order stabilization, and bounded correction/backoff
+- updated README, tests, version metadata, and runtime source baseline to v0.0.1rc17
+
 ## v0.0.1rc16 — Direct Cell Removal + Adaptive Reflow
 
 - made each `F1` through `F12` Cell badge a direct Cell-removal control

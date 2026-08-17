@@ -17,6 +17,7 @@ namespace NativeEndpointWorkspace.Tests
             Run("Strong identity fails closed when bind-time start time is missing", TestStrongIdentityFailsClosed);
             Run("Legacy layout version matching is exact", TestLayoutVersionBoundaries);
             Run("Invalid Cell topology fails fast", TestTopologyFailFast);
+            Run("Cell and shortcut surface is bounded to 1-8", TestCellAndShortcutBounds);
             Run("Destroyed handle tombstones the bound endpoint instance", TestDestroyTombstone);
             Run("Hotkey partial registration failure rolls back previous set", TestShortcutTransactionRollback);
             Run("Unsupported layout schema is rejected", TestUnsupportedSchemaRejected);
@@ -51,10 +52,29 @@ namespace NativeEndpointWorkspace.Tests
 
         private static void TestTopologyFailFast()
         {
+            AssertEqual(1, LayoutTopologyPolicy.GetRowCellCounts(1).Length);
+            AssertEqual(1, LayoutTopologyPolicy.GetRowCellCounts(3).Length);
             AssertEqual(2, LayoutTopologyPolicy.GetRowCellCounts(4).Length);
-            AssertEqual(3, LayoutTopologyPolicy.GetRowCellCounts(12).Length);
-            AssertThrows<ArgumentOutOfRangeException>(() => LayoutTopologyPolicy.GetRowCellCounts(3));
-            AssertThrows<ArgumentOutOfRangeException>(() => LayoutTopologyPolicy.GetRowCellCounts(13));
+            AssertEqual(2, LayoutTopologyPolicy.GetRowCellCounts(8).Length);
+            AssertThrows<ArgumentOutOfRangeException>(() => LayoutTopologyPolicy.GetRowCellCounts(0));
+            AssertThrows<ArgumentOutOfRangeException>(() => LayoutTopologyPolicy.GetRowCellCounts(9));
+        }
+
+        private static void TestCellAndShortcutBounds()
+        {
+            var fake = new FakeHotKeyRegistrar();
+            var service = new ShortcutService(new IntPtr(1), fake);
+            try
+            {
+                IList<ShortcutBinding> defaults = service.CreateDefaultBindings();
+                AssertEqual(8, defaults.Count);
+                AssertEqual(1, defaults.First().CellId);
+                AssertEqual(8, defaults.Last().CellId);
+            }
+            finally
+            {
+                service.Dispose();
+            }
         }
 
         private static void TestDestroyTombstone()
@@ -124,7 +144,7 @@ namespace NativeEndpointWorkspace.Tests
         {
             var state = new WorkspaceState
             {
-                Version = "0.0.1rc16",
+                Version = "0.0.1rc17",
                 LayoutSchemaVersion = 99,
                 CellCount = 4
             };

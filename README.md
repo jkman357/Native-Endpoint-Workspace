@@ -1,6 +1,6 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.1rc16  
+**Current version:** v0.0.1rc17  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Technical POC / hardening line
 
@@ -15,7 +15,7 @@ For release history, see [`CHANGELOG.md`](CHANGELOG.md).
 ```text
 WPF Workspace
     |
-    +-- Adaptive tiled Cell layout (4-12 Cells, default 8)
+    +-- Adaptive tiled Cell layout (1-8 Cells, default 8)
     |       +-- independent row/Cell proportions
     |       +-- GridSplitter redistribution
     |       +-- endpoint minimum-size accommodation
@@ -28,7 +28,7 @@ WPF Workspace
     |       +-- ~45 ms interactive coalescing
     |       +-- final precise commit after resize/splitter operations
     |       +-- requested vs verified geometry state
-    |       +-- verified top-level client repaint hint after async resize settles
+    |       +-- verified endpoint repaint/convergence handling after async resize settles
     |
     +-- Endpoint Layout Lock
     |       +-- out-of-context WinEvent observation
@@ -96,8 +96,8 @@ Runtime HWND/PID/TID data is never persisted to layout files.
 
 ## Adaptive layout
 
-- 4 through 12 Cells; default 8.
-- Cell headers use compact clickable `F1` through `F12` badges instead of redundant `Cell 1` / `Cell 2` labels. Clicking a badge removes that specific Cell, down to a minimum of 4 Cells.
+- 1 through 8 Cells; default 8.
+- Cell headers use compact clickable `F1` through `F8` badges. Clicking a badge removes that specific Cell, down to a single remaining Cell.
 - The fixed per-Cell `layout locked` footer is removed; status output is reserved for useful runtime events/results.
 - Workspace owns a fixed total layout area.
 - Splitters redistribute area instead of allowing Cells to float outside the Workspace.
@@ -112,10 +112,10 @@ Runtime HWND/PID/TID data is never persisted to layout files.
 Default endpoint assignment:
 
 ```text
-Ctrl+Shift+F1 ... Ctrl+Shift+F12
+Ctrl+Shift+F1 ... Ctrl+Shift+F8
 ```
 
-Shortcut Settings supports Ctrl / Alt / Shift combinations. At least one supported modifier is required. Bare F1-F12 and Win-key global combinations are rejected.
+Shortcut Settings supports Ctrl / Alt / Shift combinations. At least one supported modifier is required. Bare F1-F8 and Win-key global combinations are rejected.
 
 Global shortcut registration is transactional: if Windows rejects any requested hotkey, the partially registered new set is removed and the previous working set is restored.
 
@@ -178,6 +178,7 @@ Log policy:
 - retention: 5 log files total (active + rotated backups)
 - rotation is automatic
 - logging failure must not stop the Workspace
+- DEBUG mode records requested/observed endpoint rectangles and geometry-convergence results for resize/repaint investigation
 
 Examples of recorded events:
 

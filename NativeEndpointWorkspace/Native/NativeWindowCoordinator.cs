@@ -49,9 +49,14 @@ namespace NativeEndpointWorkspace.Native
                 !NativeMethods.IsWindowVisible(endpoint.Handle))
                 return false;
 
-            // Non-blocking repaint hint for the endpoint's own top-level client area.
-            // Do not enumerate or manipulate application-specific child HWNDs.
-            return NativeMethods.InvalidateRect(endpoint.Handle, IntPtr.Zero, false);
+            // Invalidate the top-level window plus its child hierarchy without enumerating,
+            // guessing, focusing, or directly manipulating application-specific child HWNDs.
+            // No RDW_UPDATENOW is used, so repaint work remains owned by the endpoint UI thread.
+            return NativeMethods.RedrawWindow(
+                endpoint.Handle,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                NativeMethods.RDW_INVALIDATE | NativeMethods.RDW_FRAME | NativeMethods.RDW_ALLCHILDREN);
         }
 
         public NativeEndpoint DescribeWindow(int cellId, IntPtr hwnd)
@@ -145,10 +150,15 @@ namespace NativeEndpointWorkspace.Native
         public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height)
         {
             int ignoredError;
-            return SyncToRectangle(endpoint, x, y, width, height, out ignoredError);
+            return SyncToRectangle(endpoint, x, y, width, height, false, out ignoredError);
         }
 
         public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height, out int nativeErrorCode)
+        {
+            return SyncToRectangle(endpoint, x, y, width, height, false, out nativeErrorCode);
+        }
+
+        public GeometrySyncResult SyncToRectangle(NativeEndpoint endpoint, int x, int y, int width, int height, bool discardClientBits, out int nativeErrorCode)
         {
             nativeErrorCode = 0;
             if (!IsEndpointIdentityCurrent(endpoint, false))
@@ -166,6 +176,12 @@ namespace NativeEndpointWorkspace.Native
             if (WindowRectMatches(endpoint.Handle, x, y, width, height))
                 return GeometrySyncResult.AlreadyCorrect;
 
+            uint flags = NativeMethods.SWP_NOACTIVATE |
+                         NativeMethods.SWP_NOZORDER |
+                         NativeMethods.SWP_ASYNCWINDOWPOS;
+            if (discardClientBits)
+                flags |= NativeMethods.SWP_NOCOPYBITS;
+
             bool ok = NativeMethods.SetWindowPos(
                 endpoint.Handle,
                 IntPtr.Zero,
@@ -173,9 +189,7 @@ namespace NativeEndpointWorkspace.Native
                 y,
                 width,
                 height,
-                NativeMethods.SWP_NOACTIVATE |
-                NativeMethods.SWP_NOZORDER |
-                NativeMethods.SWP_ASYNCWINDOWPOS);
+                flags);
 
             if (!ok)
                 nativeErrorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();

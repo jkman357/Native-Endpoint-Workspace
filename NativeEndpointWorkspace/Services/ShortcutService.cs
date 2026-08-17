@@ -112,7 +112,7 @@ namespace NativeEndpointWorkspace.Services
                 if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
                     binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
                 {
-                    binding.Status = "Rejected: only F1-F12 are supported";
+                    binding.Status = "Rejected: only F1-F8 are supported";
                     failures++;
                     continue;
                 }

@@ -23,6 +23,7 @@ namespace NativeEndpointWorkspace.UI
             CellId = cellId;
             CellBadgeButton.Content = "F" + cellId;
             EndpointText.Text = "No endpoint";
+            DetachButton.Visibility = Visibility.Collapsed;
         }
 
         public void SetEndpoint(NativeEndpoint endpoint)
@@ -31,11 +32,13 @@ namespace NativeEndpointWorkspace.UI
             {
                 EmptyText.Visibility = Visibility.Visible;
                 EndpointText.Text = "No endpoint";
+                DetachButton.Visibility = Visibility.Collapsed;
                 return;
             }
 
             EmptyText.Visibility = Visibility.Collapsed;
             EndpointText.Text = endpoint.DisplayName;
+            DetachButton.Visibility = Visibility.Visible;
         }
 
         private void DetachButton_Click(object sender, RoutedEventArgs e)

@@ -14,11 +14,11 @@ namespace NativeEndpointWorkspace.Core
             if (!LayoutVersionPolicy.IsSupported(state.LayoutSchemaVersion, state.Version))
                 throw new InvalidDataException("Layout schema/version is not supported by this application.");
             if (state.CellCount != 0 && (state.CellCount < WorkspaceConstants.MinimumCellCount || state.CellCount > WorkspaceConstants.MaximumCellCount))
-                throw new InvalidDataException("Layout CellCount is outside the supported 4-12 range.");
+                throw new InvalidDataException("Layout CellCount is outside the supported 1-8 range.");
             if (state.CellCount == 0 && (state.Cells == null || state.Cells.Count < WorkspaceConstants.MinimumCellCount || state.Cells.Count > WorkspaceConstants.MaximumCellCount))
-                throw new InvalidDataException("Legacy layout does not provide a valid 4-12 Cell count.");
+                throw new InvalidDataException("Legacy layout does not provide a valid 1-8 Cell count.");
             if (proposedCellCount < WorkspaceConstants.MinimumCellCount || proposedCellCount > WorkspaceConstants.MaximumCellCount)
-                throw new InvalidDataException("Resolved layout CellCount is outside the supported 4-12 range.");
+                throw new InvalidDataException("Resolved layout CellCount is outside the supported 1-8 range.");
 
             ValidateGridLayoutState(state.Grid, proposedCellCount);
 
@@ -33,7 +33,7 @@ namespace NativeEndpointWorkspace.Core
                     throw new InvalidDataException("Layout contains an invalid shortcut CellId.");
                 if (binding.KeyCode < WorkspaceConstants.FunctionKeyFirstVirtualKey ||
                     binding.KeyCode > WorkspaceConstants.FunctionKeyLastVirtualKey)
-                    throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F12 range.");
+                    throw new InvalidDataException("Layout contains a shortcut key outside the supported F1-F8 range.");
                 if (binding.Win)
                     throw new InvalidDataException("Layout contains a Win-key global shortcut, which is not supported.");
                 if (!binding.HasSupportedModifier)

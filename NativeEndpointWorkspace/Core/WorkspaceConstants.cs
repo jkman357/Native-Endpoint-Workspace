@@ -4,18 +4,18 @@ namespace NativeEndpointWorkspace.Core
 {
     internal static class WorkspaceConstants
     {
-        public const string Version = "0.0.1rc16";
+        public const string Version = "0.0.1rc17";
         public const int LayoutSchemaVersion = 1;
 
-        public const int MinimumCellCount = 4;
-        public const int MaximumCellCount = 12;
+        public const int MinimumCellCount = 1;
+        public const int MaximumCellCount = 8;
         public const int DefaultCellCount = 8;
 
         public const int HotKeyIdBase = 5000;
         public const int FunctionKeyFirstVirtualKey = 0x70;
-        public const int FunctionKeyLastVirtualKey = 0x7B;
+        public const int FunctionKeyLastVirtualKey = 0x77;
         public const int FunctionKeyDisplayOffset = 0x6F;
-        public const int FunctionKeyCount = 12;
+        public const int FunctionKeyCount = 8;
 
         public const double SplitterSize = 6.0;
         public const double DefaultCellMinimumWidth = 155.0;

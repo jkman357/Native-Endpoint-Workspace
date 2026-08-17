@@ -585,20 +585,30 @@ namespace NativeEndpointWorkspace
             bool heightRejected = actualHeight > desired.Height + WorkspaceConstants.SizeVerificationGrowthTolerance;
             bool widthAccepted = Math.Abs(actualWidth - desired.Width) <= WorkspaceConstants.WindowRectangleTolerance;
             bool heightAccepted = Math.Abs(actualHeight - desired.Height) <= WorkspaceConstants.WindowRectangleTolerance;
+
+            string geometryDetails = RuntimeLogService.EndpointMetadata(current) +
+                " requested=" + FormatRectForLog(desired) +
+                " observed=" + actualX + "," + actualY + "," + actualWidth + "x" + actualHeight;
+            _runtimeLog.Debug("ENDPOINT_GEOMETRY_VERIFY", geometryDetails +
+                " accepted=" + (positionAccepted && widthAccepted && heightAccepted));
+
             if (positionAccepted && widthAccepted && heightAccepted)
             {
                 _lastVerifiedCellRects[endpoint.CellId] = desired;
                 GetCorrectionState(endpoint.Handle).Reset();
 
-                // The outer native frame can settle before a compositor-backed client area
-                // repaints. After verified geometry convergence, issue one non-blocking
-                // top-level client invalidation hint. This intentionally avoids child HWNDs.
+                // Once geometry is observed at the desired rectangle, invalidate the top-level
+                // window and its child hierarchy through one HWND-scoped RedrawWindow request.
+                // This does not enumerate child HWNDs or manipulate focus/input.
                 if (_windowCoordinator.RequestClientRepaint(current))
-                    _runtimeLog.Debug("ENDPOINT_REPAINT_HINT", RuntimeLogService.EndpointMetadata(current));
+                    _runtimeLog.Debug("ENDPOINT_REPAINT_HINT", geometryDetails + " scope=top_and_children");
                 return;
             }
             if (!positionAccepted || (!widthRejected && !heightRejected))
+            {
+                _runtimeLog.Warn("ENDPOINT_GEOMETRY_NOT_CONVERGED", geometryDetails);
                 return;
+            }
 
             if (ApplyEndpointSizeAccommodation(endpoint.CellId,
                 widthRejected ? actualWidth : (int)Math.Ceiling(desired.Width),
@@ -782,6 +792,11 @@ namespace NativeEndpointWorkspace
 
         private GeometrySyncResult RepositionCellEndpoint(int cellId, out int nativeErrorCode)
         {
+            return RepositionCellEndpoint(cellId, false, out nativeErrorCode);
+        }
+
+        private GeometrySyncResult RepositionCellEndpoint(int cellId, bool finalPlacement, out int nativeErrorCode)
+        {
             nativeErrorCode = 0;
             NativeEndpoint endpoint = _registry.GetByCell(cellId);
             CellControl cell;
@@ -807,7 +822,7 @@ namespace NativeEndpointWorkspace
                 return GeometrySyncResult.Failed;
 
             _locationCorrectionSuppressedUntil[endpoint.Handle] = DateTime.UtcNow.Add(WorkspaceConstants.LocationCorrectionSuppression);
-            GeometrySyncResult result = _windowCoordinator.SyncToRectangle(endpoint, x, y, width, height, out nativeErrorCode);
+            GeometrySyncResult result = _windowCoordinator.SyncToRectangle(endpoint, x, y, width, height, finalPlacement, out nativeErrorCode);
             if (result == GeometrySyncResult.AlreadyCorrect)
             {
                 correctionState.Reset();
@@ -829,6 +844,14 @@ namespace NativeEndpointWorkspace
                    Math.Abs(left.Top - right.Top) <= WorkspaceConstants.WindowRectangleTolerance &&
                    Math.Abs(left.Width - right.Width) <= WorkspaceConstants.WindowRectangleTolerance &&
                    Math.Abs(left.Height - right.Height) <= WorkspaceConstants.WindowRectangleTolerance;
+        }
+
+        private static string FormatRectForLog(Rect rect)
+        {
+            return ((int)Math.Round(rect.Left)) + "," +
+                   ((int)Math.Round(rect.Top)) + "," +
+                   ((int)Math.Round(rect.Width)) + "x" +
+                   ((int)Math.Round(rect.Height));
         }
 
         private NativeLayoutCommitResult SyncAllEndpointGeometry(bool forceAllGeometry)
@@ -860,7 +883,7 @@ namespace NativeEndpointWorkspace
                     }
 
                     int nativeErrorCode;
-                    GeometrySyncResult result = RepositionCellEndpoint(endpoint.CellId, out nativeErrorCode);
+                    GeometrySyncResult result = RepositionCellEndpoint(endpoint.CellId, forceAllGeometry, out nativeErrorCode);
                     switch (result)
                     {
                         case GeometrySyncResult.Applied:

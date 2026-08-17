@@ -45,7 +45,7 @@ namespace NativeEndpointWorkspace.UI
             {
                 Text = "Each shortcut assigns the current foreground top-level window to its Cell. " +
                        "Conflicts are detected both inside this workspace and by Windows RegisterHotKey. " +
-                       "Use one or more Ctrl / Alt / Shift modifiers. Bare F1-F12 and Win-key global hotkeys are rejected to reduce collisions with normal application and Windows shortcuts. " +
+                       "Use one or more Ctrl / Alt / Shift modifiers. Bare F1-F8 and Win-key global hotkeys are rejected to reduce collisions with normal application and Windows shortcuts. " +
                        "Shortcut apply is all-or-nothing: if Windows rejects any requested hotkey, the previous working shortcut set is restored.",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10)

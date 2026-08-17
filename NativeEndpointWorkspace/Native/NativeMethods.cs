@@ -22,7 +22,12 @@ namespace NativeEndpointWorkspace.Native
         internal const uint SWP_NOMOVE = 0x0002;
         internal const uint SWP_NOZORDER = 0x0004;
         internal const uint SWP_NOACTIVATE = 0x0010;
+        internal const uint SWP_NOCOPYBITS = 0x0100;
         internal const uint SWP_ASYNCWINDOWPOS = 0x4000;
+
+        internal const uint RDW_INVALIDATE = 0x0001;
+        internal const uint RDW_FRAME = 0x0400;
+        internal const uint RDW_ALLCHILDREN = 0x0080;
 
         internal static readonly IntPtr HWND_TOP = IntPtr.Zero;
         internal const uint GW_HWNDNEXT = 2;
@@ -96,7 +101,7 @@ namespace NativeEndpointWorkspace.Native
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool InvalidateRect(IntPtr hWnd, IntPtr lpRect, bool bErase);
+        internal static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
