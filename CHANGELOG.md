@@ -2,6 +2,18 @@
 
 All notable changes to Native Endpoint Workspace are recorded here. `v0.0.1` is the frozen trial baseline derived from the accepted `v0.0.1rc17` freeze candidate and remains unchanged. Maintenance fixes begin at `v0.0.2rc01`.
 
+## v0.0.2rc03 — Failure-Safe Layout Persistence + Maintenance Regression Consolidation
+
+- retained the rc01 endpoint-identity/group-visibility fixes and rc02 raw-layout-validation/work-area-bounds fixes
+- changed layout save from direct destination truncation to same-directory temporary-file serialization followed by commit
+- flush and close the complete temporary XML before replacing an existing layout with `File.Replace` or moving a new layout into place
+- preserve the previous destination when serialization, flush, or replacement fails instead of pre-truncating the known-good layout
+- add best-effort cleanup for uncommitted temporary layout files without hiding the original save exception
+- add file-system regression coverage for successful replacement, failed serialization preserving the prior file, and temp-file cleanup
+- add one consolidated rc01-rc03 maintenance policy regression to keep identity, group visibility, raw validation, and bounds convergence expectations visible together
+- keep layout schema version 1 and the non-embedding/native top-level architecture unchanged
+- advance application/runtime/source metadata to `v0.0.2rc03`
+
 ## v0.0.2rc02 — Layout State Validation Ordering + Workspace Bounds Convergence
 
 - retained the rc01 strong endpoint-identity runtime enforcement and toolbar-specific minimize/restore tracking

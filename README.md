@@ -1,12 +1,12 @@
 # Native Endpoint Workspace
 
-**Current version:** v0.0.2rc02  
+**Current version:** v0.0.2rc03  
 **Target:** Windows 10 / C# / WPF / .NET Framework 4.7.2  
 **Status:** Trial maintenance RC — bug/regression fixes only
 
 Native Endpoint Workspace is a Windows workspace for arranging independent native top-level application windows as adaptive tiled **Native Endpoints**. External applications stay normal top-level windows; the Workspace manages their screen geometry, Cell membership, layout lock, group visibility, and Z-order without embedding or reparenting.
 
-`v0.0.1` remains the immutable frozen trial baseline. `v0.0.2rc02` continues the maintenance line: rc01 runtime identity/group-visibility fixes are retained, while rc02 adds raw-before-merge layout validation and full work-area bounds convergence during endpoint minimum-size accommodation.
+`v0.0.1` remains the immutable frozen trial baseline. `v0.0.2rc03` completes the first maintenance tranche: rc01 runtime identity/group-visibility fixes and rc02 validation/bounds fixes are retained, while rc03 makes layout persistence failure-safe and consolidates regression coverage across the maintenance line.
 
 For release history, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -144,7 +144,9 @@ Ctrl+O  Load Layout
 
 Layout files persist `LayoutSchemaVersion`, application version for provenance, Cell count, adaptive row/Cell proportions, and shortcut mappings. Runtime endpoint handles are never persisted.
 
-`LayoutSchemaVersion` remains independent from the application RC version; schema version 1 is unchanged in `v0.0.2rc02`. Load processing now follows a raw-validate → compatibility-merge → resolved-validate order. Valid older files may still omit shortcut entries and receive defaults, but malformed raw shortcut entries are rejected before merge. Failure-safe/atomic layout persistence remains deferred to a later maintenance RC.
+`LayoutSchemaVersion` remains independent from the application RC version; schema version 1 is unchanged in `v0.0.2rc03`. Load processing follows a raw-validate → compatibility-merge → resolved-validate order. Valid older files may still omit shortcut entries and receive defaults, but malformed raw shortcut entries are rejected before merge.
+
+Save processing is failure-safe: the complete XML is serialized to a unique temporary file in the destination directory, flushed to disk, and closed before the destination is committed. Existing files are replaced with `File.Replace`; new files are committed with a same-directory `File.Move`. If serialization, flush, or commit fails, the previous destination is not pre-truncated and temporary-file cleanup is attempted before the original exception is returned.
 
 ## DPI baseline
 
@@ -198,19 +200,19 @@ Detailed diagnostics are written to `logs\build.log`.
 test.cmd
 ```
 
-Policy-test output is written to `logs\test.log`. Automated characterization includes strong endpoint identity fail-closed behavior, required runtime strong-check policy, toolbar restore-tracking policy, raw-before-merge layout validation, work-area bounds clamping (including negative-coordinate monitors), exact legacy layout-version boundaries, Cell topology, arbitrary Cell removal shifting, destroy tombstoning, hotkey rollback, and unsupported schema rejection.
+Policy-test output is written to `logs\test.log`. Automated characterization includes strong endpoint identity fail-closed behavior, required runtime strong-check policy, toolbar restore-tracking policy, raw-before-merge layout validation, work-area bounds clamping (including negative-coordinate monitors), failure-safe layout replacement/preservation behavior, consolidated rc01-rc03 maintenance policy checks, exact legacy layout-version boundaries, Cell topology, arbitrary Cell removal shifting, destroy tombstoning, hotkey rollback, and unsupported schema rejection.
 
 Windows integration behavior (WinEvent, Z-order, DPI, mixed-app geometry, actual minimize/restore) still requires real Windows runtime regression testing.
 
-## v0.0.2rc02 regression focus
+## v0.0.2rc03 regression focus
 
-1. Run `test.cmd`; confirm all policy tests PASS and preserve both `logs\build.log` and `logs\test.log`.
-2. Load a valid older layout with missing shortcut entries; confirm defaults fill only the missing entries and the layout still loads transactionally.
-3. Load layouts containing a null shortcut, CellId outside F1-F8, unsupported/bare shortcut, or duplicate shortcut CellId; confirm the raw file is rejected before the active Workspace changes.
-4. Place the Workspace near the right/bottom edge, bind an app that rejects a small rectangle, and trigger minimum-size accommodation; confirm Workspace growth repositions as needed and remains fully inside the monitor work area.
-5. Repeat the accommodation test on a secondary monitor, including one positioned left of the primary (negative X) when available.
-6. Re-run rc01 group minimize/restore and strong endpoint-identity regression cases; confirm no maintenance regression.
-7. Confirm closing the Workspace leaves all external applications open.
+1. Run `test.cmd`; confirm all policy/persistence tests PASS and preserve both `logs\build.log` and `logs\test.log`.
+2. Save over an existing layout and confirm the new file loads correctly; force or simulate a save failure and confirm the previously valid file remains intact rather than becoming empty/partial.
+3. Confirm no `.*.tmp-*` layout temp files remain after normal successful saves; inspect any failure case for best-effort cleanup behavior.
+4. Re-run rc02 malformed-layout cases and confirm raw invalid shortcut state is rejected before compatibility merge or active Workspace mutation.
+5. Re-run rc02 right/bottom-edge and negative-coordinate-monitor minimum-size accommodation cases; confirm Workspace bounds remain fully inside the monitor work area.
+6. Re-run rc01 group minimize/restore and strong endpoint-identity cases; confirm pre-minimized apps remain minimized and native mutations still require strong identity.
+7. Bind mixed applications, exercise move/resize/maximize/restore/splitters, Detach, Cell removal, Save/Load, and close Workspace; confirm external applications remain independent top-level windows and remain open on detach/Workspace exit.
 
 ## Run
 

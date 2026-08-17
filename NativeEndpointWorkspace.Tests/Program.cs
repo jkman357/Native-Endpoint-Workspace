@@ -19,6 +19,8 @@ namespace NativeEndpointWorkspace.Tests
             Run("Toolbar restore tracks only endpoints minimized by toolbar", TestToolbarRestoreTrackingPolicy);
             Run("Raw layout validation rejects malformed shortcuts before merge", TestRawLayoutValidationOrdering);
             Run("Workspace bounds clamp converges inside monitor work area", TestWorkspaceBoundsClamp);
+            Run("Layout save replaces only after durable temp serialization", TestFailureSafeLayoutSave);
+            Run("Maintenance regression policies remain consolidated", TestMaintenanceRegressionConsolidation);
             Run("Legacy layout version matching is exact", TestLayoutVersionBoundaries);
             Run("Invalid Cell topology fails fast", TestTopologyFailFast);
             Run("Cell and shortcut surface is bounded to 1-8", TestCellAndShortcutBounds);
@@ -62,24 +64,24 @@ namespace NativeEndpointWorkspace.Tests
 
         private static void TestRawLayoutValidationOrdering()
         {
-            var invalidCount = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 99 };
+            var invalidCount = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 99 };
             AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(invalidCount));
 
-            var invalidCell = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            var invalidCell = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 4 };
             invalidCell.Shortcuts.Add(Binding(1, true, true, false, 0x70));
             invalidCell.Shortcuts.Add(Binding(9, true, true, false, 0x71));
             AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(invalidCell));
 
-            var nullEntry = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            var nullEntry = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 4 };
             nullEntry.Shortcuts.Add(null);
             AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(nullEntry));
 
-            var duplicateCell = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            var duplicateCell = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 4 };
             duplicateCell.Shortcuts.Add(Binding(1, true, true, false, 0x70));
             duplicateCell.Shortcuts.Add(Binding(1, true, false, true, 0x71));
             AssertThrows<InvalidDataException>(() => WorkspaceStateValidator.ValidateRawState(duplicateCell));
 
-            var missingEntriesAreCompatible = new WorkspaceState { Version = "0.0.2rc02", LayoutSchemaVersion = 1, CellCount = 4 };
+            var missingEntriesAreCompatible = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 4 };
             missingEntriesAreCompatible.Shortcuts.Add(Binding(1, true, true, false, 0x70));
             WorkspaceStateValidator.ValidateRawState(missingEntriesAreCompatible);
         }
@@ -104,6 +106,60 @@ namespace NativeEndpointWorkspace.Tests
                 double.NaN, double.PositiveInfinity, 800, 600, 400, 300, 100, 50, 1700, 950);
             AssertEqual(100.0, normalized.Left);
             AssertEqual(50.0, normalized.Top);
+        }
+
+
+        private static void TestFailureSafeLayoutSave()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "NativeEndpointWorkspace.Tests." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "workspace.newlayout.xml");
+            try
+            {
+                File.WriteAllText(path, "known-good-layout");
+                var service = new LayoutService();
+
+                var replacement = new WorkspaceState
+                {
+                    Version = "0.0.2rc03",
+                    LayoutSchemaVersion = 1,
+                    CellCount = 4
+                };
+                service.Save(path, replacement);
+                string saved = File.ReadAllText(path);
+                AssertTrue(saved.IndexOf("0.0.2rc03", StringComparison.Ordinal) >= 0);
+                AssertFalse(saved.IndexOf("known-good-layout", StringComparison.Ordinal) >= 0);
+                AssertEqual(0, Directory.GetFiles(directory, ".workspace.newlayout.xml.tmp-*").Length);
+
+                File.WriteAllText(path, "known-good-layout-2");
+                AssertThrows<InvalidOperationException>(() => service.Save(path, new UnsupportedWorkspaceState()));
+                AssertEqual("known-good-layout-2", File.ReadAllText(path));
+                AssertEqual(0, Directory.GetFiles(directory, ".workspace.newlayout.xml.tmp-*").Length);
+            }
+            finally
+            {
+                try { Directory.Delete(directory, true); }
+                catch { }
+            }
+        }
+
+        private static void TestMaintenanceRegressionConsolidation()
+        {
+            AssertTrue(EndpointIdentityPolicy.RequireStrongCheckForHealthRevalidation);
+            AssertTrue(EndpointIdentityPolicy.RequireStrongCheckForNativeMutation);
+            AssertTrue(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(false, true));
+            AssertFalse(GroupVisibilityPolicy.ShouldTrackForToolbarRestore(true, true));
+
+            var raw = new WorkspaceState { Version = "0.0.2rc03", LayoutSchemaVersion = 1, CellCount = 4 };
+            raw.Shortcuts.Add(Binding(1, true, true, false, 0x70));
+            WorkspaceStateValidator.ValidateRawState(raw);
+
+            WorkspaceBounds bounded = WorkspaceBoundsPolicy.ClampToWorkArea(
+                1800, 900, 700, 500, 400, 300, 0, 0, 1920, 1080);
+            AssertEqual(1220.0, bounded.Left);
+            AssertEqual(580.0, bounded.Top);
+            AssertEqual(700.0, bounded.Width);
+            AssertEqual(500.0, bounded.Height);
         }
 
         private static void TestLayoutVersionBoundaries()
@@ -233,6 +289,11 @@ namespace NativeEndpointWorkspace.Tests
             try { action(); }
             catch (T) { return; }
             throw new Exception("Expected exception " + typeof(T).Name + ".");
+        }
+
+        private sealed class UnsupportedWorkspaceState : WorkspaceState
+        {
+            public string UnsupportedPayload { get; set; }
         }
 
         private sealed class FakeHotKeyRegistrar : IHotKeyRegistrar
